@@ -23,13 +23,19 @@ therefore runs in two passes:
      short_url. It also runs the fully headless steps: the reference_id
      duplicate-rejection probe (Step 5), and the documentation writeups
      (Steps 1 and 6).
-  2. A human (or a browser-driving agent) opens each pending short_url,
-     completes the checkout with the listed test instrument, and records
-     the resulting payment_id with:
+  2. A human (or a browser-driving agent) opens each pending short_url and
+     completes the checkout with the listed test instrument. No manual
+     bookkeeping is required afterwards: each Payment Link response carries
+     an `order_id` field (present on live responses but absent from
+     Razorpay's own documented schema for this endpoint — a real, if minor,
+     doc-drift finding of its own), and every payment attempt against that
+     order — captured or failed — is discoverable via fetch_order_payments.
+     Re-running `python -m scripts.harvest_errors` backfills order_id for
+     any link created before this was discovered, then auto-discovers and
+     fetches every completed checkout by order_id, folding the results into
+     evidence/harvested_errors.jsonl. A manual fallback still exists for the
+     rare case a scenario's order_id can't be recovered:
        python -m scripts.harvest_errors record <reference_id> <payment_id>
-     Re-running `python -m scripts.harvest_errors` then fetches every
-     recorded payment_id via fetch_payment and folds it into
-     evidence/harvested_errors.jsonl.
 
 The manifest is resumable by design: Razorpay caps test-mode accounts at
 30 Payment Links, so this cannot be a single always-succeeds automated
@@ -54,6 +60,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 EVIDENCE_DIR = Path("evidence")
 MANIFEST_PATH = EVIDENCE_DIR / "harvest_manifest.json"
+PROBE_RESULT_PATH = EVIDENCE_DIR / "harvest_probe_result.json"
 HARVESTED_PATH = EVIDENCE_DIR / "harvested_errors.jsonl"
 FIELD_REPORT_PATH = EVIDENCE_DIR / "razorpay_field_report.md"
 ERROR_SNAPSHOT_PATH = EVIDENCE_DIR / "razorpay_error_codes_snapshot.md"
@@ -214,6 +221,17 @@ def _save_manifest(manifest: list[dict[str, Any]]) -> None:
     MANIFEST_PATH.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def _load_probe_result() -> dict[str, Any] | None:
+    if PROBE_RESULT_PATH.exists():
+        return json.loads(PROBE_RESULT_PATH.read_text(encoding="utf-8"))
+    return None
+
+
+def _save_probe_result(result: dict[str, Any]) -> None:
+    EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+    PROBE_RESULT_PATH.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def _build_scenarios() -> list[dict[str, Any]]:
     scenarios: list[dict[str, Any]] = []
     for i, card in enumerate(CARD_SCENARIOS):
@@ -228,6 +246,7 @@ def _build_scenarios() -> list[dict[str, Any]]:
                 "expected_error_description": card["description"],
                 "plink_id": None,
                 "short_url": None,
+                "order_id": None,
                 "payment_id": None,
                 "raw_payment": None,
             }
@@ -244,6 +263,7 @@ def _build_scenarios() -> list[dict[str, Any]]:
                 "expected_error_description": upi["description"],
                 "plink_id": None,
                 "short_url": None,
+                "order_id": None,
                 "payment_id": None,
                 "raw_payment": None,
             }
@@ -267,19 +287,49 @@ def _ensure_payment_links(client: RazorpayClient, manifest: list[dict[str, Any]]
             continue
         entry["plink_id"] = link["id"]
         entry["short_url"] = link["short_url"]
+        entry["order_id"] = link.get("order_id")
         print(
             f"  created {link['id']} ({entry['instrument']}, {entry['expected_error_reason']}): "
             f"{link['short_url']}"
         )
 
 
+def _backfill_order_ids(client: RazorpayClient, manifest: list[dict[str, Any]]) -> None:
+    # order_id isn't in Razorpay's documented Payment Links response schema
+    # (found by fetching a live link back and comparing against the docs —
+    # see the field report), so entries created before this was discovered
+    # need one GET each to pick it up.
+    for entry in manifest:
+        if entry["plink_id"] and not entry["order_id"]:
+            try:
+                link = client.fetch_payment_link(entry["plink_id"])
+            except ExecutorError as exc:
+                print(f"  ! failed to backfill order_id for {entry['plink_id']}: {exc}", file=sys.stderr)
+                continue
+            entry["order_id"] = link.get("order_id")
+
+
 def _fetch_completed(client: RazorpayClient, manifest: list[dict[str, Any]]) -> None:
     for entry in manifest:
-        if entry["payment_id"] and entry["raw_payment"] is None:
+        if entry["raw_payment"] is not None:
+            continue
+        if entry["payment_id"]:
             try:
                 entry["raw_payment"] = client.fetch_payment(entry["payment_id"])
             except ExecutorError as exc:
                 print(f"  ! failed to fetch {entry['payment_id']}: {exc}", file=sys.stderr)
+            continue
+        if entry["order_id"]:
+            try:
+                payments = client.fetch_order_payments(entry["order_id"])
+            except ExecutorError as exc:
+                print(f"  ! failed to fetch payments for {entry['order_id']}: {exc}", file=sys.stderr)
+                continue
+            if payments:
+                payment = payments[-1]
+                entry["payment_id"] = payment.get("id")
+                entry["raw_payment"] = payment
+                print(f"  discovered {payment.get('id')} for {entry['reference_id']} (auto, via order_id)")
 
 
 def _write_harvested(manifest: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -310,12 +360,17 @@ def _write_harvested(manifest: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return records
 
 
-def _reference_id_probe(client: RazorpayClient) -> dict[str, Any]:
+def _reference_id_probe(client: RazorpayClient) -> dict[str, Any] | None:
     suffix = str(ULID())[-10:].lower()
     reference_id = f"secondrail-probe-{suffix}"[:40]
     payload = {"amount": 100, "currency": "INR", "description": "Second Rail reference_id probe"}
 
-    first = client.create_payment_link(payload, reference_id)
+    try:
+        first = client.create_payment_link(payload, reference_id)
+    except ExecutorError as exc:
+        print(f"  ! probe's first create_payment_link call failed, skipping probe this run: {exc}", file=sys.stderr)
+        return None
+
     result: dict[str, Any] = {"reference_id": reference_id, "first_plink_id": first["id"]}
 
     second_plink_id = None
@@ -527,6 +582,8 @@ def main(argv: list[str]) -> None:
     manifest = _load_manifest()
     if not manifest:
         manifest = _build_scenarios()
+    for entry in manifest:
+        entry.setdefault("order_id", None)
 
     if len(argv) >= 4 and argv[1] == "record":
         _cmd_record(manifest, argv[2], argv[3])
@@ -538,15 +595,25 @@ def main(argv: list[str]) -> None:
         _ensure_payment_links(client, manifest)
         _save_manifest(manifest)
 
-        print("Fetching payment objects for every completed checkout...")
+        _backfill_order_ids(client, manifest)
+        _save_manifest(manifest)
+
+        print("Fetching payment objects for every completed checkout (auto-discovered via order_id)...")
         _fetch_completed(client, manifest)
         _save_manifest(manifest)
 
         records = _write_harvested(manifest)
 
-        print("Running the reference_id duplicate-rejection probe...")
-        probe = _reference_id_probe(client)
-        print(f"  {probe['outcome']}")
+        probe = _load_probe_result()
+        if probe is not None:
+            print("reference_id probe already recorded from a previous run — not re-running "
+                  "(each attempt spends Payment Link quota).")
+        else:
+            print("Running the reference_id duplicate-rejection probe...")
+            probe = _reference_id_probe(client)
+            if probe is not None:
+                _save_probe_result(probe)
+            print(f"  {probe['outcome'] if probe else 'skipped this run — see stderr above'}")
 
     _write_field_report(probe, records)
     _write_error_snapshot()

@@ -113,6 +113,17 @@ def test_cancel_payment_link_hits_cancel_path():
     assert result["status"] == "cancelled"
 
 
+def test_fetch_payment_link_hits_get_path():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/payment_links/plink_1"
+        assert request.method == "GET"
+        return httpx.Response(200, json={"id": "plink_1", "status": "created", "payments": []})
+
+    link = _client(handler).fetch_payment_link("plink_1")
+
+    assert link["status"] == "created"
+
+
 def test_token_bucket_spaces_out_acquisitions(monkeypatch):
     now = {"t": 0.0}
     slept: list[float] = []

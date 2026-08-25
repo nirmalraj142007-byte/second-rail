@@ -8,11 +8,15 @@ https://api.razorpay.com/v1/. The SDK stays in requirements.txt for
 reference only — no code path here imports it.
 
 Razorpay does not publish a universal per-second rate limit across its API
-(only documented, per-endpoint limits exist for a handful of routes). 2
-requests/second is a self-imposed conservative bound chosen for this
-project, not a documented Razorpay limit — it exists so a harvest run or a
-batch run cannot trip whatever undocumented limit actually governs the
-account.
+(only documented, per-endpoint limits exist for a handful of routes). This
+project originally self-throttled at 2 requests/second as a conservative
+guess. That guess was wrong: a real test-mode harvest run against
+POST /v1/payment_links on 25 Aug 2026 got HTTP 429 on more than half its
+calls at 2 rps, even after the bounded retry exhausted its attempts. The
+bound here (0.5 rps) is a second, still self-imposed, empirically-informed
+guess — not a documented Razorpay limit either — chosen after that failure
+so a harvest run or a batch run doesn't spend its retry budget on 429s
+that a slower steady rate would have avoided outright.
 """
 
 from __future__ import annotations
@@ -29,7 +33,7 @@ RAZORPAY_BASE_URL = "https://api.razorpay.com/v1"
 
 _MAX_ATTEMPTS = 4
 _RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
-_SELF_IMPOSED_RATE_PER_SECOND = 2.0
+_SELF_IMPOSED_RATE_PER_SECOND = 0.5
 
 
 class _TokenBucket:
@@ -154,3 +158,6 @@ class RazorpayClient:
 
     def cancel_payment_link(self, plink_id: str) -> dict[str, Any]:
         return self._request("POST", f"/payment_links/{plink_id}/cancel")
+
+    def fetch_payment_link(self, plink_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/payment_links/{plink_id}")
