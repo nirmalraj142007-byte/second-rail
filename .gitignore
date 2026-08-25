@@ -1,0 +1,22 @@
+# Environment
+.env
+
+# Virtual environment
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Database
+*.db
+*.db-wal
+*.db-shm
+second_rail.db
+
+# LLM response cache — committed from Phase 18 onward so `make eval` runs
+# offline with no key. Until then, generated cache entries stay untracked.
+cache/*.json
+!cache/.gitkeep
