@@ -51,7 +51,7 @@ rollback:
 	@echo "not yet built — phase 8 (make rollback)"
 
 harvest:
-	@echo "not yet built — phase 5 (make harvest)"
+	$(PY) -m scripts.harvest_errors
 
 migrate:
 	@echo "not yet built — phase TBD (make migrate)"

@@ -9,5 +9,10 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
 
+[tool.ruff.lint.per-file-ignores]
+# Verbatim Razorpay doc strings — reflowing them would violate "verbatim
+# means verbatim" (see the module docstring in scripts/harvest_errors.py).
+"scripts/harvest_errors.py" = ["E501"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

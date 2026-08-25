@@ -71,3 +71,77 @@ Ruff also flagged `tests/test_config.py`'s import block as unsorted on the
 first run, because ruff's isort didn't know `src` was first-party and
 grouped it with third-party imports. Added `known-first-party = ["src"]`
 to `pyproject.toml`; that's now `make lint`-clean.
+
+## D1 (evening) — 25 Aug 2026
+
+Phase 1: `src/razorpay_client.py` (raw httpx, not the SDK, so the audit
+trail can carry the real status code/body/request-id), `scripts/harvest_errors.py`
+(the D2 harvest job), and every real doc source it depends on. This session
+did not produce `evidence/harvested_errors.jsonl` — see below, it's a hard
+blocker, not a shortcut I took.
+
+**What I read before writing anything, per the phase's own instruction not
+to invent test data from memory:** the current (fetched today) rendered
+versions of Razorpay's test-card page, test-UPI page, the generic API
+error-response page, the common-errors page, the Payment entity reference,
+and the Payment Links create/cancel reference. The plain-HTTP fetch tool
+missed every table on the first two pages — they render client-side — so I
+had to load them in an actual browser and read the accessibility tree
+instead. Worth remembering for any future doc-scraping step in this
+project: don't trust a bare `WebFetch` against razorpay.com/docs to see
+tables.
+
+**What I found that I didn't expect:** the blueprint's U-flagged worry about
+`error_code`/`error_description`/`error_source`/`error_step`/`error_reason`
+possibly having drifted was worth taking seriously, because there are
+*two different* Razorpay error shapes that are easy to conflate. The
+generic API error-response object (returned when an API *call* itself is
+malformed) uses unprefixed fields — `code`, `description`, `field`,
+`source`, `step`, `reason`. The Payment *entity's own* fields — what this
+project actually reads, via `fetch_payment` or the `payment.failed`
+webhook — are the prefixed ones, and I confirmed today they're still on
+the live Payments Entity doc page with real examples. Good news for the
+architecture; bad news if I'd built `src/diagnose` against the wrong one
+without checking.
+
+**Where my first hypothesis was wrong:** I assumed Razorpay would have a
+documented, standard-test-account, server-to-server JSON endpoint for
+forcing a UPI Collect failure — enough tutorials reference old
+`/v1/payments/create/...` S2S flows that I expected `make harvest` to be
+fully headless. I spent real time searching (direct URL guesses, the docs
+site search box, the site's own error-codes and payments hub pages) and
+found no such endpoint documented as of today. What the current docs
+actually describe, for both cards and UPI, is: open Razorpay's hosted
+checkout, pick a method, enter the test instrument, submit — and for
+cards, click Failure on the mock bank screen. There is no way to force a
+real failure without completing that page. I designed
+`scripts/harvest_errors.py` around that reality instead of the one I
+assumed going in: it creates the Payment Links headlessly (real API
+calls) and writes a resumable `evidence/harvest_manifest.json`, but
+completing each checkout is a separate, explicit interactive pass —
+either by me driving a real browser against the real `short_url`s, or by
+whoever runs this next.
+
+**The reference_id probe (Step 5) result:** not yet run. Razorpay's own
+Payment Links "Create" error list documents `payment link creation with
+reference ID already attempted` as a 400 response to a duplicate
+`reference_id` — so the *documented* answer is "rejected" — but the phase
+spec is explicit that documentation isn't the same as the empirical
+answer, and I haven't been able to run the probe for real yet. It's fully
+built and headless (`_reference_id_probe` in `scripts/harvest_errors.py`)
+and will run automatically the moment `make harvest` has real credentials
+to work with.
+
+**The actual blocker:** there is no `.env` in this repo and no Razorpay
+test-mode keys anywhere I have access to. Every non-negotiable this
+project has committed to — no mocks, no fake data, fail loudly instead of
+faking canned data when a key is missing — means I will not synthesize
+`harvested_errors.jsonl`. I verified the one thing that *is* verifiable
+without keys: `make harvest` reads `.env`, finds nothing, and exits 2 with
+`[MISSING_RAZORPAY_CREDENTIALS] missing required Razorpay credential(s):
+RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET — copy .env.example to .env and fill
+in the missing value(s)` — no traceback, no partial file written to
+`evidence/`. That satisfies the phase's "exits 2, never crashes"
+requirement on its own, but the >=20-record harvest, the field-existence
+report, the error-code snapshot, and the reference_id probe result all
+still need a real key before they can be anything but "not yet run."
