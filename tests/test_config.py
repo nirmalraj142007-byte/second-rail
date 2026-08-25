@@ -46,9 +46,9 @@ def test_require_razorpay_raises_config_error_naming_missing_vars():
 
 
 def test_require_razorpay_succeeds_when_both_credentials_present():
-    settings = Settings(razorpay_key_id="rzp_test_xxx", razorpay_key_secret="secret")
+    settings = Settings(razorpay_key_id="dummy_key_id", razorpay_key_secret="dummy_secret")
 
     key_id, key_secret = require_razorpay(settings)
 
-    assert key_id == "rzp_test_xxx"
-    assert key_secret == "secret"
+    assert key_id == "dummy_key_id"
+    assert key_secret == "dummy_secret"
