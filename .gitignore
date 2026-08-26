@@ -20,3 +20,8 @@ second_rail.db
 # offline with no key. Until then, generated cache entries stay untracked.
 cache/*.json
 !cache/.gitkeep
+
+# Per-run audit chains are working output, not evidence — a small,
+# committed excerpt (evidence/audit_sample.jsonl) is added in Phase 18.
+evidence/audit/*.jsonl
+!evidence/audit/.gitkeep

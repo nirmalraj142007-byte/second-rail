@@ -304,3 +304,70 @@ meaningful identifiers, not autoincrementing local counters.
 No real assumption-under-pressure moment this session beyond those two —
 the schema, migration idempotency, and constraint tests all matched the
 spec cleanly once the table-count question was settled.
+
+## D2 (later) — 26 Aug 2026
+
+Phase 3: `src/audit/writer.py`, `src/audit/verify.py`,
+`tests/test_audit_chain.py`. Hash-chained JSONL audit log, streaming
+verifier, tamper-test CLI.
+
+**Where my first hypothesis was wrong, and it wasn't in my own logic.**
+`make verify-audit` on the real 2000-record file from the acceptance
+script printed `chain BROKEN at seq 1000` — reproducibly, on every run.
+My first instinct was to distrust `verify_chain()` itself: reread the
+hash-chaining math, re-derived the genesis value, checked for an
+off-by-one in the streaming lookahead. All of it was correct — calling
+`verify_chain()` directly against the exact same file, in a fresh
+Python process, reported `intact: True`. The bug wasn't in the function;
+it was in how it got *invoked*. Calling `main()` (the Typer callback)
+directly as a plain Python function also worked. Only going through the
+real CLI — `python -m src.audit.verify --all` — broke it, and it broke
+at exactly seq 1000, the halfway point of 2000, every single time.
+
+Isolated it with a five-line reproduction outside this project entirely:
+a bare `typer.Typer()` app with one `bool = typer.Option(False, "--all")`
+parameter. Called with `--all` on the command line, the parameter came
+through as `None`. Called with no flag at all, it came through as the
+*string* `'False'`, not the boolean `False`. `requirements.txt` pins
+`typer==0.12.5` but never pinned `click` — Typer's own transitive
+dependency — so `pip install` resolved the newest available click,
+8.4.2, released long after 0.12.5 and apparently carrying a regression
+in how boolean `Option` values get coerced. Pinned `click==8.1.7`
+(contemporaneous with 0.12.5) in `requirements.txt`, reinstalled, and
+the flag started arriving as a real `True`/`False`. `--all` had silently
+been landing on the "verify the newest single file with no flags"
+default path this whole time, which happened to also be `run_test.jsonl`
+— so the two-file aggregation logic was *never actually exercised* by
+any of my manual testing until I went looking for why the number was
+wrong, not just whether a number appeared.
+
+The lesson worth keeping: when a fast, deterministic, and *exact* wrong
+answer shows up (broken at exactly the halfway point, every time,
+independent of what's in the file), that's a much stronger signal of a
+plumbing/parsing bug upstream of your logic than of a subtle bug in the
+logic itself. Real business-logic bugs are rarely that clean. I nearly
+spent the debugging budget re-deriving hash arithmetic that was already
+correct instead of asking "does this function even see what I think it
+sees" first.
+
+**Separately, and expected:** the acceptance script's own snippet
+constructs an `AuditWriter` for `run_id="run_test"` without ever calling
+`start_run()`, so `audit_record.run_id`'s foreign key to `run(run_id)`
+has nothing to point at. Every one of the 2000 mirror-insert attempts
+failed with `sqlite3.IntegrityError: FOREIGN KEY constraint failed`,
+each one caught, logged as a warning, and correctly *not* rolled back —
+the JSONL file still has all 2000 records, still verifies intact, none
+of the writes were lost. This is the append-only discipline working
+exactly as specified ("the JSONL line has already been written — that
+is correct and intentional"), not a bug — real callers create the `run`
+row first. Left as-is rather than special-cased for the smoke-test
+script, since papering over a missing `start_run()` call would hide the
+same mistake in a real caller too.
+
+`make verify-audit` timing on the acceptance run: `chain intact — 2000
+records (0.08s)`, comfortably under the 2s budget. Writing those 2000
+records (fsync on every line, by design) took several seconds on this
+machine's OneDrive-synced working directory — worth knowing about for
+the demo, since a slow disk under fsync pressure is a real, visible
+thing on camera, but it's the write path, not the verify path the phase
+actually budgets.

@@ -267,3 +267,32 @@ def end_run(
         (ended_at, episode_count, stopped_reason, llm_cost_paise, throughput_epm, run_id),
     )
     conn.commit()
+
+
+def insert_audit_record(
+    conn: sqlite3.Connection,
+    *,
+    event_id: str,
+    run_id: str | None,
+    episode_id: str | None,
+    actor: str,
+    stage: str,
+    inputs_hash: str | None,
+    prev_hash: str,
+    audit_hash: str,
+    seq: int,
+) -> None:
+    """Mirror one row into audit_record. The JSONL file is the source of
+    truth (src/audit/writer.py); this is a queryable index over it, not a
+    second copy of record content — only the chain-verification fields and
+    enough context to look a record up are stored here."""
+    conn.execute(
+        """
+        INSERT INTO audit_record (
+            event_id, run_id, episode_id, actor, stage, inputs_hash,
+            prev_hash, hash, seq
+        ) VALUES (?,?,?,?,?,?,?,?,?)
+        """,
+        (event_id, run_id, episode_id, actor, stage, inputs_hash, prev_hash, audit_hash, seq),
+    )
+    conn.commit()

@@ -11,7 +11,7 @@ else
 	PIP := $(VENV_BIN)/pip
 endif
 
-.PHONY: setup doctor lint test clean data eval demo approve verify-audit rollback harvest migrate db-check
+.PHONY: setup doctor lint test clean data eval demo approve verify-audit verify-audit-tamper rollback harvest migrate db-check
 
 setup:
 	$(PYTHON311) -m venv .venv
@@ -45,7 +45,13 @@ approve:
 	@echo "not yet built — phase 8 (make approve)"
 
 verify-audit:
-	@echo "not yet built — phase 3 (make verify-audit)"
+	$(PY) -m src.audit.verify --all
+
+# evidence/audit_sample.jsonl (a small, committed excerpt of a real audit
+# chain) is added in Phase 18 — evidence/audit/*.jsonl itself is per-run
+# working output and stays untracked except for .gitkeep.
+verify-audit-tamper:
+	$(PY) -m src.audit.verify --tamper-test
 
 rollback:
 	@echo "not yet built — phase 8 (make rollback)"
