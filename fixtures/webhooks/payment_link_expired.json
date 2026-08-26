@@ -1,0 +1,28 @@
+{
+  "entity": "event",
+  "account_id": "acc_test_fixture",
+  "event": "payment_link.expired",
+  "contains": ["payment_link"],
+  "payload": {
+    "payment_link": {
+      "entity": {
+        "id": "plink_TESTEXPIRED001",
+        "entity": "payment_link",
+        "amount": 100,
+        "currency": "INR",
+        "status": "expired",
+        "reference_id": "ref_TESTEXPIRED001",
+        "description": "Second Rail recovery link (fixture)",
+        "short_url": "https://rzp.io/i/TESTEXPIRED1",
+        "order_id": null,
+        "notify": {"sms": false, "email": false},
+        "reminder_enable": false,
+        "notes": {},
+        "created_at": 1787712800,
+        "expire_by": 1787713700,
+        "expired_at": 1787713700
+      }
+    }
+  },
+  "created_at": 1787713701
+}

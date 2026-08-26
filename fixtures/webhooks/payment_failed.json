@@ -1,0 +1,57 @@
+{
+  "entity": "event",
+  "account_id": "acc_test_fixture",
+  "event": "payment.failed",
+  "contains": ["payment"],
+  "payload": {
+    "payment": {
+      "entity": {
+        "id": "pay_TU6NMPiyJVkobn",
+        "entity": "payment",
+        "amount": 100,
+        "currency": "INR",
+        "status": "failed",
+        "order_id": "order_TU5t4c2IOIhSVq",
+        "invoice_id": null,
+        "international": false,
+        "method": "card",
+        "amount_refunded": 0,
+        "refund_status": null,
+        "captured": false,
+        "description": "#TU5WQlznHrYRwS",
+        "card_id": "card_TU6NMeAFVQz7lT",
+        "card": {
+          "id": "card_TU6NMeAFVQz7lT",
+          "entity": "card",
+          "name": "",
+          "last4": "0000",
+          "network": "Visa",
+          "type": "debit",
+          "issuer": "DCBL",
+          "international": false,
+          "emi": false,
+          "sub_type": "consumer",
+          "token_iin": "410028000"
+        },
+        "bank": null,
+        "wallet": null,
+        "vpa": null,
+        "email": "[redacted]",
+        "contact": "[redacted]",
+        "notes": [],
+        "fee": null,
+        "tax": null,
+        "error_code": "BAD_REQUEST_ERROR",
+        "error_description": "Payment failed",
+        "error_source": "gateway",
+        "error_step": "payment_authorization",
+        "error_reason": "payment_failed",
+        "acquirer_data": {
+          "auth_code": null
+        },
+        "created_at": 1787682570
+      }
+    }
+  },
+  "created_at": 1787682571
+}

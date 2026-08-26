@@ -516,3 +516,67 @@ critique verbatim and predates this phase — left untouched rather than
 scrubbed, since it's the historical record of the problem being solved,
 not a claim this codebase makes about itself. `ruff check` clean; all 49
 tests pass (32 pre-existing plus 17 new across the two Phase 5 suites).
+
+## D3 — 26 Aug 2026
+
+Phase 6: `src/ingest/{signature,normalize,service,app}.py`,
+`tests/test_ingest.py`, `fixtures/webhooks/*.json`,
+`scripts/replay_webhooks.py`, plus small additions to already-built modules
+— `src/db/repo.get_webhook_event`, `src/config.require_webhook_secret`,
+and widening `AuditWriter.__init__`'s `run_id` to `str | None`.
+
+**Where the first assumption was wrong.** Went in planning to read the
+webhook's own dedup id off the JSON body — every other identifier in this
+project (`payment_id`, `order_id`) lives in the body, so that felt like the
+obvious place to look. Before writing `service.py`'s dedup check, checked
+Razorpay's actual webhook docs instead of trusting that assumption (the
+proposal itself flagged its own recall of Razorpay specifics as
+unreliable), and the real answer is different: the payload has no event
+id of its own at all. Razorpay puts it in the `X-Razorpay-Event-Id`
+*header*, explicitly documented as the field to dedup on, separate from
+`X-Razorpay-Signature`. That's a real design fork, not a naming detail —
+it meant `IngestService.handle_event` takes `event_id` as a caller-supplied
+argument rather than extracting it from `payload`, and it settled a second
+question for free: since a retried delivery of the *same* event reuses the
+same header value, and `webhook_event.event_id` is that table's PRIMARY
+KEY (fixed back in Phase 2's schema), a literal replay can never produce a
+second row — it can only ever be caught by a SELECT-before-INSERT check
+and recorded via the audit log, not via a second `dedup_result="duplicate"`
+row. The *other* duplicate path — same `payment_id`, different
+`event_id` — is what actually produces that second row, via
+`payment_failed_duplicate.json`. `tests/test_ingest.py` encodes both paths
+as separate cases rather than only the one the phase brief's literal DoD
+wording implied.
+
+**Second thing that needed a real decision, not a default.** The webhook
+server is a long-lived process, not a batch `run` — but `audit_record.run_id`
+is a foreign key into `run`, whose `mode` enum (`dry_run`/`execute`/`fixture`)
+has no slot for "serving." Rather than invent a `run` row for a process that
+isn't a run, or bypass the FK with a bogus id, `AuditWriter` now accepts
+`run_id: str | None`; the ingest server passes `None` and gets its own
+append-only `evidence/audit/ingest.jsonl`, distinct from any batch's
+`{run_id}.jsonl`. `NULL` on a FK column is never checked by SQLite, so this
+costs nothing and is exactly the honest answer: these audit records aren't
+part of a run.
+
+Also hit, and worth naming: `sqlite3.Connection` objects are single-thread
+by default, and the background worker thread that actually processes
+queued webhooks is not the thread that opened the connection used by
+`GET /health`. First version shared one connection across both and every
+queued event failed with `SQLite objects created in a thread can only be
+used in that same thread` — silently, since the worker only logs and moves
+on rather than crashing the server (that's deliberate: one bad event must
+never take down the listener). Fixed by giving the worker thread its own
+connection, `AuditWriter`, and `IngestService`, opened inside the thread
+function itself rather than passed in from the main thread.
+
+Verified end to end on a real local run (`make serve` had no `make` on
+this Windows/git-bash shell, so ran the equivalent `python -m uvicorn …`
+directly): `GET /health` → `{"status":"ok","run_id":null,"db":"ok"}`;
+`scripts/replay_webhooks.py` against all 6 fixtures →
+`webhook_event` dedup_result counts `new: 2, duplicate: 1, out_of_order: 3`;
+`episode` count `1` (only `payment_failed.json`; the malformed fixture
+correctly produced zero episodes and one `exception_entry` row with
+`reason_code="SCHEMA_DRIFT_FIELD_MISSING"` instead); `make verify-audit`
+equivalent → `chain intact — 2006 records`. `ruff check` clean; all 56
+tests pass (49 pre-existing plus 7 new in `test_ingest.py`).

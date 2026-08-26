@@ -1,0 +1,85 @@
+{
+  "entity": "event",
+  "account_id": "acc_test_fixture",
+  "event": "payment_link.paid",
+  "contains": ["payment_link", "payment", "order"],
+  "payload": {
+    "payment_link": {
+      "entity": {
+        "id": "plink_TESTPAID000001",
+        "entity": "payment_link",
+        "amount": 100,
+        "currency": "INR",
+        "status": "paid",
+        "reference_id": "ref_TESTPAID000001",
+        "description": "Second Rail recovery link (fixture)",
+        "short_url": "https://rzp.io/i/TESTPAID001",
+        "order_id": "order_TU5t4aLGdMiXaQ",
+        "notify": {"sms": false, "email": false},
+        "reminder_enable": false,
+        "notes": {},
+        "created_at": 1787712700,
+        "expire_by": 1787713600,
+        "expired_at": null
+      }
+    },
+    "payment": {
+      "entity": {
+        "id": "pay_TUEvUZzy35A6km",
+        "entity": "payment",
+        "amount": 100,
+        "currency": "INR",
+        "status": "captured",
+        "order_id": "order_TU5t4aLGdMiXaQ",
+        "invoice_id": null,
+        "international": false,
+        "method": "card",
+        "amount_refunded": 0,
+        "refund_status": null,
+        "captured": true,
+        "description": "#TU5WSvq5sUvK1r",
+        "card_id": "card_TUEvUnUQBEm45p",
+        "card": {
+          "id": "card_TUEvUnUQBEm45p",
+          "entity": "card",
+          "name": "",
+          "last4": "0002",
+          "network": "Visa",
+          "type": "debit",
+          "issuer": "DCBL",
+          "international": false,
+          "emi": false,
+          "sub_type": "consumer",
+          "token_iin": "410028000"
+        },
+        "bank": null,
+        "wallet": null,
+        "vpa": null,
+        "email": "[redacted]",
+        "contact": "[redacted]",
+        "notes": [],
+        "fee": null,
+        "tax": null,
+        "error_code": null,
+        "error_description": null,
+        "error_source": null,
+        "error_step": null,
+        "error_reason": null,
+        "acquirer_data": {
+          "auth_code": "654321"
+        },
+        "created_at": 1787712720
+      }
+    },
+    "order": {
+      "entity": {
+        "id": "order_TU5t4aLGdMiXaQ",
+        "entity": "order",
+        "amount": 100,
+        "currency": "INR",
+        "status": "paid"
+      }
+    }
+  },
+  "created_at": 1787712721
+}

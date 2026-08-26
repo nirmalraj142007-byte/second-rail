@@ -56,6 +56,17 @@ def require_razorpay(settings: Settings) -> tuple[str, str]:
     return settings.razorpay_key_id, settings.razorpay_key_secret
 
 
+def require_webhook_secret(settings: Settings) -> str:
+    """Raise ConfigError naming exactly which credential is missing."""
+    if not settings.razorpay_webhook_secret:
+        raise ConfigError(
+            "missing required credential: RAZORPAY_WEBHOOK_SECRET",
+            remediation="copy .env.example to .env and fill in the webhook secret",
+            code="MISSING_WEBHOOK_SECRET",
+        )
+    return settings.razorpay_webhook_secret
+
+
 _DOCTOR_VARS: list[tuple[str, str, str]] = [
     ("RAZORPAY_KEY_ID", "razorpay_key_id", "Razorpay API key id (test or live mode)"),
     ("RAZORPAY_KEY_SECRET", "razorpay_key_secret", "Razorpay API key secret"),

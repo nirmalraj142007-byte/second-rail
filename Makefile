@@ -11,7 +11,7 @@ else
 	PIP := $(VENV_BIN)/pip
 endif
 
-.PHONY: setup doctor lint test clean data seal verify-seal eval demo approve verify-audit verify-audit-tamper rollback harvest migrate db-check config-check
+.PHONY: setup doctor lint test clean data seal verify-seal eval demo approve verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve tunnel replay-webhooks
 
 setup:
 	$(PYTHON311) -m venv .venv
@@ -67,6 +67,19 @@ harvest:
 
 migrate:
 	$(PY) -m src.db.migrate
+
+serve:
+	$(PY) -m uvicorn src.ingest.app:app --port 8000
+
+# cloudflared prints a public HTTPS URL on stdout — paste that URL, with
+# /webhooks/razorpay appended, into the Razorpay dashboard's webhook config.
+# The URL changes on every restart of this command, so the dashboard config
+# goes stale each time — see LIMITATIONS.md.
+tunnel:
+	cloudflared tunnel --url http://localhost:8000
+
+replay-webhooks:
+	$(PY) -m scripts.replay_webhooks
 
 db-check:
 	$(PY) -m src.db.migrate --check

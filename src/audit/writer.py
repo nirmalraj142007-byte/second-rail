@@ -79,13 +79,20 @@ def _now_iso() -> str:
 
 
 class AuditWriter:
-    def __init__(self, run_id: str, audit_dir: Path, conn: Connection) -> None:
+    def __init__(self, run_id: str | None, audit_dir: Path, conn: Connection) -> None:
         self._run_id = run_id
         self._conn = conn
         self._logger = get_logger("audit", run_id=run_id, stage="audit")
 
         audit_dir.mkdir(parents=True, exist_ok=True)
-        self._path = audit_dir / f"{run_id}.jsonl"
+        # The webhook ingest server (src/ingest/app.py) is a long-lived
+        # process, not a batch run — it has no run_id, since `run` rows only
+        # exist for dry_run/execute/fixture batches (see schema.sql). Its
+        # audit trail is its own append-only file rather than being folded
+        # into whichever batch run happens to be active (or fabricating a
+        # fake `run` row just to satisfy the FK).
+        filename = f"{run_id}.jsonl" if run_id is not None else "ingest.jsonl"
+        self._path = audit_dir / filename
         self._next_seq, self._prev_hash = self._resume_state()
 
         # Opened once, in append mode, for the writer's full lifetime.

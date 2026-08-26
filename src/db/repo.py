@@ -180,6 +180,12 @@ def insert_webhook_event(
         ) from exc
 
 
+def get_webhook_event(conn: sqlite3.Connection, event_id: str) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM webhook_event WHERE event_id = ?", (event_id,)
+    ).fetchone()
+
+
 def insert_gate_check(
     conn: sqlite3.Connection,
     *,
