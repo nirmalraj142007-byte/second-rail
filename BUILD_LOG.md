@@ -259,3 +259,48 @@ this project reads back a real customer-facing field from a live
 Razorpay object, redaction needs to happen at the capture boundary, by
 default, not as something I remember to add when I notice the field
 exists.
+
+## D2 — 26 Aug 2026
+
+Phase 2: `src/db/schema.sql`, `migrate.py`, `repo.py`, and
+`tests/test_db_constraints.py`. No business logic — `src/gate/`,
+`src/diagnose/`, etc. still don't exist. `make migrate`, `make migrate`
+again, `make db-check`, and `make test` all run clean via the real
+Makefile targets (verified through `mingw32-make`, not just the
+underlying Python commands — see the D1 entry on why that distinction
+matters on this machine).
+
+**Two arithmetic discrepancies in the phase spec, both resolved by
+following the blueprint instead of the summary text, per this project's
+own stated tie-break rule:**
+
+1. The phase prompt's header says "Tables (14)" and the acceptance test
+   says "→ 14 tables", but its own detailed column-level spec — which
+   matches `second-rail-build-blueprint.md` §6 line for line — defines
+   16 named tables, including `harvested_error` (M-08's evidence anchor)
+   and `exception_entry` (C-05's "no episode silently dropped" guarantee).
+   Built all 16. Dropping either of those two to hit "14" would have
+   broken a judge-facing clause other phases depend on, for the sake of
+   matching a number that appears to be a simple miscount.
+2. The VERIFY block expects `PRAGMA index_list(episode)` to show 4
+   indexes; it shows 5. `episode_id` is a `TEXT PRIMARY KEY`, not
+   `INTEGER PRIMARY KEY` — SQLite only aliases the rowid for the integer
+   case, so a text primary key gets its own real auto-index
+   (`sqlite_autoindex_episode_1`, `origin: pk`) in addition to the
+   auto-index the `UNIQUE(payment_id)` constraint creates
+   (`sqlite_autoindex_episode_2`, `origin: u`) and the 3 explicit
+   `CREATE INDEX` statements — 3 + 1 + 1 = 5. This is standard SQLite
+   behavior for a non-integer PK, not a schema bug, and I didn't reshape
+   the schema to force the count down to match a VERIFY line that assumed
+   integer-PK aliasing.
+
+Both are flagged here rather than silently "fixed" to match the stated
+numbers, since every PK in this schema is deliberately a TEXT id
+(`ep_*`, `pay_*`, ULIDs elsewhere) — switching to `INTEGER PRIMARY KEY`
+anywhere just to make an index count line up would be a worse schema for
+a database whose primary keys are meant to be stable, externally
+meaningful identifiers, not autoincrementing local counters.
+
+No real assumption-under-pressure moment this session beyond those two —
+the schema, migration idempotency, and constraint tests all matched the
+spec cleanly once the table-count question was settled.

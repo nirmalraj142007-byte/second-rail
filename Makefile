@@ -11,7 +11,7 @@ else
 	PIP := $(VENV_BIN)/pip
 endif
 
-.PHONY: setup doctor lint test clean data eval demo approve verify-audit rollback harvest migrate
+.PHONY: setup doctor lint test clean data eval demo approve verify-audit rollback harvest migrate db-check
 
 setup:
 	$(PYTHON311) -m venv .venv
@@ -22,7 +22,7 @@ doctor:
 	$(PY) -m src.config doctor
 
 lint:
-	$(PY) -m ruff check src tests
+	$(PY) -m ruff check src tests scripts
 
 test:
 	$(PY) -m pytest -q
@@ -33,7 +33,7 @@ clean:
 	find . -name '__pycache__' -type d -prune -exec rm -rf {} +
 
 data:
-	@echo "not yet built — phase 2 (make data)"
+	@echo "not yet built — synthetic generator, not yet scheduled (make data)"
 
 eval:
 	@echo "not yet built — phase 7 (make eval)"
@@ -54,4 +54,7 @@ harvest:
 	$(PY) -m scripts.harvest_errors
 
 migrate:
-	@echo "not yet built — phase TBD (make migrate)"
+	$(PY) -m src.db.migrate
+
+db-check:
+	$(PY) -m src.db.migrate --check
