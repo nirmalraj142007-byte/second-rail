@@ -11,7 +11,7 @@ else
 	PIP := $(VENV_BIN)/pip
 endif
 
-.PHONY: setup doctor lint test clean data eval demo approve verify-audit verify-audit-tamper rollback harvest migrate db-check config-check
+.PHONY: setup doctor lint test clean data seal verify-seal eval demo approve verify-audit verify-audit-tamper rollback harvest migrate db-check config-check
 
 setup:
 	$(PYTHON311) -m venv .venv
@@ -33,7 +33,13 @@ clean:
 	find . -name '__pycache__' -type d -prune -exec rm -rf {} +
 
 data:
-	@echo "not yet built — synthetic generator, not yet scheduled (make data)"
+	$(PY) -m data.generator
+
+seal:
+	$(PY) -m scripts.seal seal
+
+verify-seal:
+	$(PY) -m scripts.seal verify
 
 eval:
 	@echo "not yet built — phase 7 (make eval)"

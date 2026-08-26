@@ -50,6 +50,12 @@ class TaxonomyClass(BaseModel):
     definition: str
     recoverable_in_principle: bool
     source: TaxonomySource
+    # Drives data/generator.py's cause mix (generation_weight) and the
+    # sealed split's simulated customer-response draw (response_base_rate).
+    # Both illustrative, not sourced — see outcome_model.md Appendix
+    # (2026-08-26).
+    generation_weight: float
+    response_base_rate: float
     anchor_error_strings: list[AnchorErrorString] = []
     regex_patterns: list[str] = []
     justification: str | None = None
@@ -63,6 +69,20 @@ class TaxonomyClass(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _generation_and_response_fields_in_range(self) -> TaxonomyClass:
+        if not (0.0 < self.generation_weight <= 1.0):
+            raise ValueError(
+                f"class {self.class_id}: generation_weight must be in (0, 1], "
+                f"got {self.generation_weight}"
+            )
+        if not (0.0 <= self.response_base_rate <= 1.0):
+            raise ValueError(
+                f"class {self.class_id}: response_base_rate must be in [0, 1], "
+                f"got {self.response_base_rate}"
+            )
+        return self
+
 
 class Taxonomy(BaseModel):
     classes: list[TaxonomyClass]
@@ -73,6 +93,16 @@ class Taxonomy(BaseModel):
         dupes = {i for i in ids if ids.count(i) > 1}
         if dupes:
             raise ValueError(f"duplicate class_id(s): {sorted(dupes)}")
+        return self
+
+    @model_validator(mode="after")
+    def _generation_weights_sum_to_one(self) -> Taxonomy:
+        total = sum(c.generation_weight for c in self.classes)
+        if abs(total - 1.0) > 0.01:
+            raise ValueError(
+                f"class generation_weight values sum to {total:.4f} across "
+                f"{len(self.classes)} classes, expected ~1.0"
+            )
         return self
 
     def class_ids(self) -> list[str]:

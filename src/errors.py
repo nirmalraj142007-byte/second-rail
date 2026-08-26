@@ -145,3 +145,12 @@ class StoppingRuleTriggered(SecondRailError):
 
     code = "STOPPING_RULE_TRIGGERED"
     stage = "run"
+
+
+class HoldoutLeakageError(SecondRailError):
+    """Something under src/ tried to read the sealed split's ground-truth
+    file. Halts immediately; this is never expected control flow. See
+    scripts/holdout_guard.py."""
+
+    code = "HOLDOUT_LEAKAGE"
+    stage = "eval"

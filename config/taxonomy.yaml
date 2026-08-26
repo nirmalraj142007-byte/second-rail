@@ -49,6 +49,12 @@ classes:
       complete the payment at authorization time.
     recoverable_in_principle: true
     source: harvested
+    # generation_weight / response_base_rate feed data/generator.py's cause
+    # mix and holdout/labels.jsonl's simulated customer-response draw —
+    # both illustrative, not sourced. See outcome_model.md Appendix
+    # (2026-08-26) for the response_base_rate derivation.
+    generation_weight: 0.22
+    response_base_rate: 0.45
     anchor_error_strings:
       - error_code: BAD_REQUEST_ERROR
         error_description: Payment failed
@@ -65,6 +71,8 @@ classes:
       independent of any customer data-entry mistake.
     recoverable_in_principle: true
     source: harvested
+    generation_weight: 0.16
+    response_base_rate: 0.30
     anchor_error_strings:
       - error_code: BAD_REQUEST_ERROR
         error_description: Payment failed
@@ -91,6 +99,8 @@ classes:
       health problem.
     recoverable_in_principle: true
     source: harvested
+    generation_weight: 0.12
+    response_base_rate: 0.50
     anchor_error_strings:
       - error_code: BAD_REQUEST_ERROR
         error_description: Payment failed
@@ -111,6 +121,8 @@ classes:
       payment — distinct from a wrong static PIN.
     recoverable_in_principle: true
     source: harvested
+    generation_weight: 0.14
+    response_base_rate: 0.60
     anchor_error_strings:
       - error_code: BAD_REQUEST_ERROR
         error_description: Payment failed
@@ -127,6 +139,8 @@ classes:
       resets, not on immediate retry.
     recoverable_in_principle: true
     source: harvested
+    generation_weight: 0.06
+    response_base_rate: 0.35
     anchor_error_strings:
       - error_code: BAD_REQUEST_ERROR
         error_description: Payment failed
@@ -154,6 +168,8 @@ classes:
       this harvest.
     recoverable_in_principle: true
     source: harvested
+    generation_weight: 0.10
+    response_base_rate: 0.20
     anchor_error_strings:
       - error_code: BAD_REQUEST_ERROR
         error_description: >-
@@ -180,6 +196,8 @@ classes:
       the customer.
     recoverable_in_principle: true
     source: harvested
+    generation_weight: 0.08
+    response_base_rate: 0.70
     anchor_error_strings:
       - error_code: BAD_REQUEST_ERROR
         error_description: Payment failed
@@ -200,6 +218,8 @@ classes:
       (`config/guardrails.yaml: outage_cluster_threshold`).
     recoverable_in_principle: true
     source: harvested
+    generation_weight: 0.07
+    response_base_rate: 0.65
     anchor_error_strings:
       - error_code: BAD_REQUEST_ERROR
         error_description: Payment failed
@@ -225,6 +245,8 @@ classes:
       bank-side outage.
     recoverable_in_principle: true
     source: harvested
+    generation_weight: 0.05
+    response_base_rate: 0.55
     anchor_error_strings:
       - error_code: BAD_REQUEST_ERROR
         error_description: Payment failed
