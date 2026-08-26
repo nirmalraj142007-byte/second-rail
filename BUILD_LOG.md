@@ -384,3 +384,74 @@ convention) before the next commit cross-checks every anchor string
 against the real harvest file field-by-field. `make config-check` is
 expected to fail against this version — that's the intended signal that
 ratification hasn't happened yet, not a bug in the checker.
+
+Phase 4, second commit: ratified `config/taxonomy.yaml`, plus
+`config/policy_table.yaml`, `config/guardrails.yaml`,
+`src/config_models.py`, `scripts/config_check.py`,
+`docs/where-the-llm-is-not.md`, `tests/test_config_artifacts.py`, and the
+`make config-check` Makefile target.
+
+**The anchoring problem, and the decision it forced.** Re-reading
+`evidence/harvested_errors.jsonl` field-by-field before writing a single
+anchor: 19 of the 20 records share the exact same `error_code`
+(`BAD_REQUEST_ERROR`) and `error_description` (`"Payment failed"`) —
+`evidence/razorpay_field_report.md`'s own D1-night headline finding, that
+8 distinct real test-card numbers all came back through the gateway with
+one generic envelope. Anchoring a nine-class taxonomy on
+`error_code`/`error_description` alone, as the phase template's YAML
+example implies, would either produce two real classes (generic-card and
+the one genuinely-differentiated netbanking-cancellation record) or
+require pretending 18 generic strings are more distinguishable than they
+are. Neither is honest. The field that *does* carry real per-record
+signal, verbatim in the same file, is `planned_error_reason` — what the
+harvest harness told each specific payment to force, using Razorpay's own
+documented reason vocabulary (cross-referenced in
+`evidence/razorpay_error_codes_snapshot.md`). Every anchor in the ratified
+file carries `error_code`, `error_description`, *and* `reason` — all
+three checked verbatim against the sourced harvest record by
+`make config-check` check 2 — rather than silently anchoring on the field
+that doesn't actually distinguish anything and hoping nobody checks.
+
+**Nine classes, derived, not assumed.** All 20 harvested records sorted
+cleanly into 9 classes by their `planned_error_reason` with no leftover
+and no `source: inferred` class needed — insufficient_funds,
+issuer_declined, invalid_entered_details, authentication_failed,
+limit_or_attempts_exceeded, customer_abandoned, payment_timed_out,
+issuer_bank_technical_error, device_or_app_unreachable. This matches the
+nine-class shape `outcome_model.md` §2 pre-committed to before this phase
+started, but the count wasn't chosen to hit nine — it fell out of
+grouping 18 distinct `planned_error_reason` values by shared policy
+implication (does the same instrument retry make sense, or not) and
+landed on nine on its own.
+
+**Design consequence flagged for Phase 5+, not buried:** a regex baseline
+classifier that reads only `error_description` will misclassify nearly
+every card-instrument episode in this evidence set into one bucket, since
+that field doesn't vary. `regex_patterns` in the ratified taxonomy match
+both the raw reason token and the documented human-readable phrasing, so
+the baseline has a chance against a real payload exposing either form,
+but this is exactly the kind of result the project's non-negotiables ask
+to report as a headline (regex vs. LLM, §"non-circular metrics") rather
+than something Phase 5 discovers cold.
+
+**Policy table:** 27 explicit rules (3 per cause class, varying
+band/segment/instrument) plus a conservative `default_rule`
+(`[open_ticket, no_action]`, `human_keystroke`) resolving the remaining
+297 of 324 cartesian cells — `make config-check` check 4 confirms all 324
+resolve. Tier logic is one stated rule applied consistently: band A1 is
+auto, A2 is auto for repeat/high_value and human_keystroke for
+first_time, A3 is human_keystroke always — A3's floor (500,001 paise)
+sits exactly one paise above `guardrails.auto_approve_ceiling_paise`
+(500,000), which is the literal mechanism behind "human keystroke above a
+rupee threshold." None of the nine classes is itself non-recoverable, so
+`hard_refuse` in this design comes entirely from the four runtime
+`hard_refuse_conditions` (opt-out, already-paid, episode-age cap,
+issuer-outage cluster), not from a class-level flag — Phase 7 wires the
+actual checks.
+
+**Verification:** `make config-check` (run directly as
+`python -m scripts.config_check` — no `make` binary on this machine, same
+as every prior phase) prints all 8 PASS lines; `wc -l
+config/guardrails.yaml` is 16; `ruff check` is clean; all 32 tests pass
+(6 pre-existing suites plus the 6 new cases in
+`tests/test_config_artifacts.py`).

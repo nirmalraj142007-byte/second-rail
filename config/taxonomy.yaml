@@ -1,18 +1,45 @@
-# Second Rail — cause taxonomy (PROVISIONAL, pre-harvest structure)
+# Second Rail — cause taxonomy (RATIFIED against evidence/harvested_errors.jsonl)
 #
-# This version exists to fix the taxonomy's shape — class count, field
-# structure, the regex/anchor convention — before it gets ratified against
-# evidence/harvested_errors.jsonl in the next commit. Every anchor below
-# cites evidence/razorpay_error_codes_snapshot.md (source: doc) because at
-# this point in the build the harvest file has not yet been cross-checked
-# field-by-field against these labels. No anchor_error_strings entry here
-# carries a harvest_id — that is precisely what the ratification commit
-# adds, and `make config-check`'s verbatim-anchor check will fail on this
-# version, on purpose, until that happens.
+# Read this before trusting any anchor below at face value.
 #
-# Nine classes, chosen to match the structure outcome_model.md §2 already
-# pre-committed to ("the nine-class taxonomy gets frozen against harvested
-# Razorpay error strings").
+# `evidence/razorpay_field_report.md`'s headline finding (D1 night) is that
+# every one of the 8 distinct real test-card numbers used to force a
+# specific failure came back through the hosted checkout with the *same*
+# generic gateway envelope: error_code "BAD_REQUEST_ERROR", error_reason
+# "payment_failed", error_description "Payment failed". Only one of the 20
+# harvested records (harvest_id 01M0Y2S99XK580TN1P4B9ZZ5H6, completed via
+# Netbanking, not Card) came back with a genuinely differentiated
+# error_description. That means, honestly stated: for 19/20 harvested
+# records, `error_code` and `error_description` alone carry almost no
+# per-cause signal — they collapse to one bucket.
+#
+# The real per-record signal that DOES survive, verbatim, in
+# evidence/harvested_errors.jsonl is the `planned_error_reason` field —
+# what the harvest harness intended to force for that specific payment,
+# using Razorpay's own documented test-instrument -> reason mapping
+# (cross-referenced in evidence/razorpay_error_codes_snapshot.md as an
+# independent, doc-sourced corroboration of what each `planned_error_reason`
+# token means). Every anchor below therefore carries three verbatim fields
+# checked against the harvest file, not two:
+#   error_code / error_description — the actual gateway response (mostly
+#     generic; included for completeness and because `make config-check`
+#     verifies these exactly against the record).
+#   reason — the record's `planned_error_reason` (or, for the one record
+#     where it differs, the actual `error_reason`) — the field that
+#     actually distinguishes these nine classes.
+#
+# Design consequence carried into Phase 5+: a regex baseline classifier
+# that only reads `error_description` will misclassify almost every
+# card-instrument episode in this evidence set into one bucket. The
+# regex_patterns below are written to match BOTH the raw reason token
+# (e.g. "insufficient_fund") and the human-readable description text
+# documented for it, so the baseline has a chance against a real payload
+# that exposes either form — but the fact that this harvest's own
+# description field mostly didn't distinguish causes is exactly the kind
+# of finding this project's non-negotiables ask to report as a headline,
+# not bury. See BUILD_LOG.md, D2 (evening), second entry.
+#
+# All 20 harvested records are used below — none left unclassified.
 
 classes:
   - class_id: C1
@@ -21,12 +48,12 @@ classes:
       The customer's account or instrument did not have enough balance to
       complete the payment at authorization time.
     recoverable_in_principle: true
-    source: doc
+    source: harvested
     anchor_error_strings:
       - error_code: BAD_REQUEST_ERROR
-        error_description: >-
-          Your payment could not be completed due to insufficient account
-          balance. Try another card or payment method.
+        error_description: Payment failed
+        reason: insufficient_fund
+        harvest_id: 01M0Y2S99XA62M7FCT7AD835RS
     regex_patterns:
       - "(?i)insufficient[_\\s]?fund(s)?"
 
@@ -34,17 +61,27 @@ classes:
     label: issuer_declined
     definition: >-
       The issuing bank or wallet refused the instrument itself — declined,
-      disabled for online use, or blocked — independent of any customer
-      data-entry mistake.
+      disabled for online use, or the specific card/account blocked —
+      independent of any customer data-entry mistake.
     recoverable_in_principle: true
-    source: doc
+    source: harvested
     anchor_error_strings:
       - error_code: BAD_REQUEST_ERROR
-        error_description: >-
-          Your payment did not go through as it was declined by the bank.
-          Try another payment method or contact your bank.
+        error_description: Payment failed
+        reason: card_declined
+        harvest_id: 01M0Y2S99XRJW32SH8V15X49GB
+      - error_code: BAD_REQUEST_ERROR
+        error_description: Payment failed
+        reason: card_disabled_for_online_payments
+        harvest_id: 01M0Y2S99XVV5CP9DQEACATSBJ
+      - error_code: BAD_REQUEST_ERROR
+        error_description: Payment failed
+        reason: debit_instrument_blocked
+        harvest_id: 01M0Y2S99XVSMTKM1GR0QC9E9C
     regex_patterns:
-      - "(?i)declined by the bank|disabled for online payments|instrument.*blocked"
+      - "(?i)card_declined|declined by the bank"
+      - "(?i)disabled for online payments"
+      - "(?i)debit_instrument_blocked|account linked.*is blocked"
 
   - class_id: C3
     label: invalid_entered_details
@@ -53,12 +90,19 @@ classes:
       up (card number, UPI PIN) — a data-entry problem, not an instrument
       health problem.
     recoverable_in_principle: true
-    source: doc
+    source: harvested
     anchor_error_strings:
       - error_code: BAD_REQUEST_ERROR
-        error_description: You have entered an incorrect card number. Try again.
+        error_description: Payment failed
+        reason: card_number_invalid
+        harvest_id: 01M0Y2S99XMMC5D4NY70ZMSM1K
+      - error_code: BAD_REQUEST_ERROR
+        error_description: Payment failed
+        reason: pin_not_set
+        harvest_id: 01M0Y2S99XD2ADM65TC4EKVZ1B
     regex_patterns:
-      - "(?i)incorrect card number|pin.*not set|invalid card"
+      - "(?i)card_number_invalid|incorrect card number"
+      - "(?i)pin_not_set|not set the upi pin"
 
   - class_id: C4
     label: authentication_failed
@@ -66,15 +110,14 @@ classes:
       Dynamic authentication (OTP, 3DS challenge) failed at the moment of
       payment — distinct from a wrong static PIN.
     recoverable_in_principle: true
-    source: doc
+    source: harvested
     anchor_error_strings:
       - error_code: BAD_REQUEST_ERROR
-        error_description: >-
-          Your payment could not be completed due to incorrect OTP or
-          verification details. Try another payment method or contact your
-          bank for details.
+        error_description: Payment failed
+        reason: authentication_failed
+        harvest_id: 01M0Y2S99XN8A4504TY39AE2TN
     regex_patterns:
-      - "(?i)authentication failed|incorrect otp|verification details"
+      - "(?i)authentication_failed|authentication failed|incorrect otp"
 
   - class_id: C5
     label: limit_or_attempts_exceeded
@@ -83,29 +126,52 @@ classes:
       attempt limit was hit — recoverable, but only after the limit window
       resets, not on immediate retry.
     recoverable_in_principle: true
-    source: doc
+    source: harvested
     anchor_error_strings:
       - error_code: BAD_REQUEST_ERROR
-        error_description: >-
-          Payment was unsuccessful as you exceeded the amount limit for the
-          day with this bank account. Try using another account.
+        error_description: Payment failed
+        reason: pin_attempts_exceeded
+        harvest_id: 01M0Y2S99X9G0KHRQZ8H1GBZTP
+      - error_code: BAD_REQUEST_ERROR
+        error_description: Payment failed
+        reason: transaction_limit_exceeded
+        harvest_id: 01M0Y2S99X8J27DAV25ZZ018TK
+      - error_code: BAD_REQUEST_ERROR
+        error_description: Payment failed
+        reason: transaction_frequency_limit_exceeded
+        harvest_id: 01M0Y2S99XYPKN8TAEJRS3M2X9
     regex_patterns:
-      - "(?i)limit exceeded|attempts exceeded|frequency limit"
+      - "(?i)pin_attempts_exceeded|breached the limit"
+      - "(?i)transaction_limit_exceeded|exceeded the amount limit"
+      - "(?i)transaction_frequency_limit_exceeded|exceeded the number of attempts"
 
   - class_id: C6
     label: customer_abandoned
     definition: >-
       The customer actively cancelled or declined the payment request
-      mid-flow rather than the payment failing technically.
+      mid-flow rather than the payment failing technically. The one class
+      whose anchor is the actual (not merely planned) gateway response in
+      this harvest.
     recoverable_in_principle: true
-    source: doc
+    source: harvested
     anchor_error_strings:
       - error_code: BAD_REQUEST_ERROR
         error_description: >-
           Your payment has been cancelled. Try again or complete the
           payment later.
+        reason: payment_cancelled
+        harvest_id: 01M0Y2S99XK580TN1P4B9ZZ5H6
+      - error_code: BAD_REQUEST_ERROR
+        error_description: Payment failed
+        reason: payment_cancelled
+        harvest_id: 01M0Y2S99X6VF2X2T59B3T8NXV
+      - error_code: BAD_REQUEST_ERROR
+        error_description: Payment failed
+        reason: payment_declined
+        harvest_id: 01M0Y2S99XYE8KHR4S5F00634Q
     regex_patterns:
-      - "(?i)cancelled|declined the payment"
+      - "(?i)cancelled"
+      - "(?i)payment_declined|declined the payment request"
 
   - class_id: C7
     label: payment_timed_out
@@ -113,29 +179,43 @@ classes:
       A transient timeout with no fault attributable to the instrument or
       the customer.
     recoverable_in_principle: true
-    source: doc
+    source: harvested
     anchor_error_strings:
       - error_code: BAD_REQUEST_ERROR
-        error_description: >-
-          Your payment could not be completed due to a temporary issue. Try
-          again later.
+        error_description: Payment failed
+        reason: payment_timed_out
+        harvest_id: 01M0Y2S99XKARZ8SFGX28ZT373
+      - error_code: BAD_REQUEST_ERROR
+        error_description: Payment failed
+        reason: payment_timed_out
+        harvest_id: 01M0Y2S99X7PYM2APST6858TBC
     regex_patterns:
-      - "(?i)time.?out|temporary issue"
+      - "(?i)payment_timed_out|time.?out|temporary issue"
 
   - class_id: C8
     label: issuer_bank_technical_error
     definition: >-
       A technical fault on the gateway or issuing bank's side — the
-      candidate cause class for the issuer-outage hard-refusal cluster.
+      candidate cause class for the issuer-outage hard-refusal cluster
+      (`config/guardrails.yaml: outage_cluster_threshold`).
     recoverable_in_principle: true
-    source: doc
+    source: harvested
     anchor_error_strings:
-      - error_code: GATEWAY_ERROR
-        error_description: >-
-          Your payment did not go through due to a temporary issue. Any
-          debited amount will be refunded in 4-5 business days.
+      - error_code: BAD_REQUEST_ERROR
+        error_description: Payment failed
+        reason: gateway_technical_error
+        harvest_id: 01M0Y2S99X40W2X7ZR9W870TRC
+      - error_code: BAD_REQUEST_ERROR
+        error_description: Payment failed
+        reason: bank_technical_error
+        harvest_id: 01M0Y2S99XJWVXDTFTC7GBT405
+      - error_code: BAD_REQUEST_ERROR
+        error_description: Payment failed
+        reason: bank_technical_error
+        harvest_id: 01M0Y2S99X69E4QDPYKQM03YXY
     regex_patterns:
-      - "(?i)technical error|gateway.*error"
+      - "(?i)gateway_technical_error|technical error"
+      - "(?i)bank_technical_error|temporary issue at your bank"
 
   - class_id: C9
     label: device_or_app_unreachable
@@ -144,11 +224,16 @@ classes:
       authentication — a device/app-availability problem, distinct from a
       bank-side outage.
     recoverable_in_principle: true
-    source: doc
+    source: harvested
     anchor_error_strings:
-      - error_code: GATEWAY_ERROR
-        error_description: >-
-          Payment was unsuccessful as the UPI app is not reachable at this
-          time.
+      - error_code: BAD_REQUEST_ERROR
+        error_description: Payment failed
+        reason: invalid_device
+        harvest_id: 01M0Y2S99XVZJ9Y746X0V84T15
+      - error_code: BAD_REQUEST_ERROR
+        error_description: Payment failed
+        reason: upi_app_not_available
+        harvest_id: 01M0Y2S99XPCNFHBEZQHPG12E1
     regex_patterns:
-      - "(?i)not (be )?registered|app is not reachable|invalid device"
+      - "(?i)invalid_device|not (be )?registered on the app"
+      - "(?i)upi_app_not_available|app is not reachable"

@@ -1,0 +1,329 @@
+# Second Rail — admissible-action policy table.
+#
+# Tier convention applied consistently across every explicit rule below
+# (stated once here rather than repeated in 27 justification lines):
+#   band A1                          -> auto
+#   band A2, segment repeat/high_value -> auto
+#   band A2, segment first_time      -> human_keystroke
+#   band A3 (> guardrails.auto_approve_ceiling_paise, 500000 paise)
+#                                     -> human_keystroke, always
+# This is the literal mechanism behind "gets a human keystroke above a
+# rupee threshold" (README non-negotiable) — A3's floor (500001 paise)
+# sits exactly one paise above the guardrail ceiling.
+#
+# Totality: this file does not enumerate the full 9-class x 3-band x
+# 3-segment x 4-instrument cartesian product (324 combinations) by hand.
+# It enumerates 27 representative rules — 3 per cause class, chosen to
+# show real policy differentiation across band/segment/instrument — and
+# resolves every other combination through `default_rule` below, which
+# `make config-check`'s totality check treats as covering the remainder.
+# An unmatched (cause, band, segment, instrument) tuple never reaches
+# runtime: it is either one of the 27 explicit rules or the default.
+
+amount_bands:
+  - id: A1
+    min_paise: 0
+    max_paise: 100000
+  - id: A2
+    min_paise: 100001
+    max_paise: 500000
+  - id: A3
+    min_paise: 500001
+    max_paise: null
+
+actions:
+  - id: link_same_instrument
+  - id: link_alt_instrument
+  - id: defer_2h
+  - id: open_ticket
+  - id: no_action
+
+rules:
+  # C1 — insufficient_funds
+  - policy_rule_id: P-01
+    cause_class: C1
+    amount_band: A1
+    segment: repeat
+    instrument: upi
+    admissible_actions: [link_alt_instrument, defer_2h, no_action]
+    escalation_tier: auto
+    justification: >-
+      Low amount, proven customer; a different funding source or a short
+      wait covers both plausible explanations for low balance.
+  - policy_rule_id: P-02
+    cause_class: C1
+    amount_band: A2
+    segment: first_time
+    instrument: card
+    admissible_actions: [link_alt_instrument, defer_2h, no_action]
+    escalation_tier: human_keystroke
+    justification: >-
+      Unproven customer at a meaningful amount; a human reviews before a
+      second charge attempt against a different instrument.
+  - policy_rule_id: P-03
+    cause_class: C1
+    amount_band: A3
+    segment: high_value
+    instrument: wallet
+    admissible_actions: [link_alt_instrument, defer_2h, no_action]
+    escalation_tier: human_keystroke
+    justification: Above the auto-approve ceiling; every band-A3 rule requires a human regardless of segment trust.
+
+  # C2 — issuer_declined
+  - policy_rule_id: P-04
+    cause_class: C2
+    amount_band: A1
+    segment: first_time
+    instrument: card
+    admissible_actions: [link_alt_instrument, defer_2h, no_action]
+    escalation_tier: auto
+    justification: >-
+      The instrument itself is impaired; retrying the same one would
+      likely repeat the failure, so only alt-instrument or a wait are
+      offered even at low amount.
+  - policy_rule_id: P-05
+    cause_class: C2
+    amount_band: A2
+    segment: repeat
+    instrument: upi
+    admissible_actions: [link_alt_instrument, defer_2h, no_action]
+    escalation_tier: auto
+    justification: Repeat-customer trust permits auto tier at mid amount with the same instrument-avoidance reasoning as P-04.
+  - policy_rule_id: P-06
+    cause_class: C2
+    amount_band: A3
+    segment: high_value
+    instrument: netbanking
+    admissible_actions: [link_alt_instrument, open_ticket, no_action]
+    escalation_tier: human_keystroke
+    justification: >-
+      Above the ceiling; a human confirms the alt-instrument nudge or
+      opens a ticket for manual follow-up instead.
+
+  # C3 — invalid_entered_details
+  - policy_rule_id: P-07
+    cause_class: C3
+    amount_band: A1
+    segment: first_time
+    instrument: card
+    admissible_actions: [link_same_instrument, link_alt_instrument, no_action]
+    escalation_tier: auto
+    justification: >-
+      Likely a typo or unset PIN, not an instrument problem; same-
+      instrument retry is reasonable even for a new customer at low
+      amount.
+  - policy_rule_id: P-08
+    cause_class: C3
+    amount_band: A2
+    segment: high_value
+    instrument: wallet
+    admissible_actions: [link_same_instrument, link_alt_instrument, no_action]
+    escalation_tier: auto
+    justification: High-value segment at mid amount; same-instrument retry stays admissible since the cause is data entry, not instrument health.
+  - policy_rule_id: P-09
+    cause_class: C3
+    amount_band: A3
+    segment: repeat
+    instrument: card
+    admissible_actions: [link_same_instrument, no_action]
+    escalation_tier: human_keystroke
+    justification: Above the ceiling, only the same-instrument nudge stays admissible; everything else needs a human decision.
+
+  # C4 — authentication_failed
+  - policy_rule_id: P-10
+    cause_class: C4
+    amount_band: A1
+    segment: repeat
+    instrument: card
+    admissible_actions: [link_same_instrument, defer_2h, no_action]
+    escalation_tier: auto
+    justification: OTP failures are usually one-off; a repeat customer at low amount can be nudged automatically.
+  - policy_rule_id: P-11
+    cause_class: C4
+    amount_band: A2
+    segment: first_time
+    instrument: netbanking
+    admissible_actions: [link_same_instrument, defer_2h, no_action]
+    escalation_tier: human_keystroke
+    justification: First-time segment at mid amount; a human reviews before nudging an unproven customer again.
+  - policy_rule_id: P-12
+    cause_class: C4
+    amount_band: A3
+    segment: high_value
+    instrument: card
+    admissible_actions: [link_same_instrument, no_action]
+    escalation_tier: human_keystroke
+    justification: Above the ceiling; only the same-instrument retry is offered, no alternative avenue.
+
+  # C5 — limit_or_attempts_exceeded
+  - policy_rule_id: P-13
+    cause_class: C5
+    amount_band: A1
+    segment: repeat
+    instrument: upi
+    admissible_actions: [defer_2h, link_alt_instrument, no_action]
+    escalation_tier: auto
+    justification: Limits reset on a clock the system doesn't control; deferral is the primary lever, alt-account is a secondary option.
+  - policy_rule_id: P-14
+    cause_class: C5
+    amount_band: A2
+    segment: high_value
+    instrument: card
+    admissible_actions: [defer_2h, link_alt_instrument, no_action]
+    escalation_tier: auto
+    justification: High-value trust permits auto tier at mid amount with the same deferral-first reasoning as P-13.
+  - policy_rule_id: P-15
+    cause_class: C5
+    amount_band: A3
+    segment: first_time
+    instrument: wallet
+    admissible_actions: [defer_2h, no_action]
+    escalation_tier: human_keystroke
+    justification: >-
+      Above the ceiling and for an unproven customer, deferral is the
+      only admissible action besides doing nothing.
+
+  # C6 — customer_abandoned
+  - policy_rule_id: P-16
+    cause_class: C6
+    amount_band: A1
+    segment: first_time
+    instrument: netbanking
+    admissible_actions: [link_same_instrument, defer_2h, no_action]
+    escalation_tier: auto
+    justification: >-
+      The customer backed out of a completed flow rather than failing
+      technically; nudging the same instrument is the most direct
+      recovery.
+  - policy_rule_id: P-17
+    cause_class: C6
+    amount_band: A2
+    segment: repeat
+    instrument: card
+    admissible_actions: [link_same_instrument, defer_2h, no_action]
+    escalation_tier: auto
+    justification: Repeat-customer trust extends the same reasoning as P-16 to mid amount.
+  - policy_rule_id: P-18
+    cause_class: C6
+    amount_band: A3
+    segment: high_value
+    instrument: upi
+    admissible_actions: [link_same_instrument, no_action]
+    escalation_tier: human_keystroke
+    justification: Above the ceiling; only the direct same-instrument nudge is offered.
+
+  # C7 — payment_timed_out
+  - policy_rule_id: P-19
+    cause_class: C7
+    amount_band: A1
+    segment: repeat
+    instrument: card
+    admissible_actions: [link_same_instrument, no_action]
+    escalation_tier: auto
+    justification: >-
+      Pure transient delay; nothing about the instrument or customer is
+      implicated, immediate retry is the obvious action.
+  - policy_rule_id: P-20
+    cause_class: C7
+    amount_band: A2
+    segment: high_value
+    instrument: upi
+    admissible_actions: [link_same_instrument, no_action]
+    escalation_tier: auto
+    justification: High-value trust permits auto tier at mid amount for the same transient cause.
+  - policy_rule_id: P-21
+    cause_class: C7
+    amount_band: A3
+    segment: first_time
+    instrument: netbanking
+    admissible_actions: [link_same_instrument, no_action]
+    escalation_tier: human_keystroke
+    justification: Above the ceiling; a human confirms even a low-risk transient-cause retry.
+
+  # C8 — issuer_bank_technical_error
+  - policy_rule_id: P-22
+    cause_class: C8
+    amount_band: A1
+    segment: repeat
+    instrument: netbanking
+    admissible_actions: [link_alt_instrument, defer_2h, no_action]
+    escalation_tier: auto
+    justification: >-
+      Bank/gateway-side fault; below the outage-cluster threshold this is
+      an isolated technical blip, but the same instrument is avoided
+      since the fault sits upstream of the customer.
+  - policy_rule_id: P-23
+    cause_class: C8
+    amount_band: A2
+    segment: high_value
+    instrument: card
+    admissible_actions: [link_alt_instrument, defer_2h, no_action]
+    escalation_tier: auto
+    justification: High-value trust permits auto tier at mid amount with the same instrument-avoidance reasoning as P-22.
+  - policy_rule_id: P-24
+    cause_class: C8
+    amount_band: A3
+    segment: first_time
+    instrument: wallet
+    admissible_actions: [defer_2h, no_action]
+    escalation_tier: human_keystroke
+    justification: >-
+      Above the ceiling; if this cause is also clustering system-wide,
+      `hard_refuse_conditions.issuer_outage_cluster` below overrides this
+      rule at gate time regardless of the tier stated here.
+
+  # C9 — device_or_app_unreachable
+  - policy_rule_id: P-25
+    cause_class: C9
+    amount_band: A1
+    segment: repeat
+    instrument: upi
+    admissible_actions: [link_alt_instrument, defer_2h, no_action]
+    escalation_tier: auto
+    justification: Device/app problem is instrument-specific; alt-instrument is the primary lever even at low amount.
+  - policy_rule_id: P-26
+    cause_class: C9
+    amount_band: A2
+    segment: first_time
+    instrument: wallet
+    admissible_actions: [link_alt_instrument, defer_2h, no_action]
+    escalation_tier: human_keystroke
+    justification: First-time segment at mid amount; a human reviews before nudging via an alternate instrument.
+  - policy_rule_id: P-27
+    cause_class: C9
+    amount_band: A3
+    segment: high_value
+    instrument: upi
+    admissible_actions: [link_alt_instrument, no_action]
+    escalation_tier: human_keystroke
+    justification: Above the ceiling; only the alt-instrument nudge is offered.
+
+default_rule:
+  admissible_actions: [open_ticket, no_action]
+  escalation_tier: human_keystroke
+  justification: >-
+    Unlisted (cause_class, amount_band, segment, instrument) combination —
+    27 explicit rules above cover representative cells per cause class,
+    not the full 324-cell cartesian product. Rather than guess at
+    unvalidated policy for the remainder, a human decides case-by-case;
+    the agent may open a ticket for visibility or do nothing, nothing
+    more.
+
+# Runtime conditions (Phase 7 implements the checks) that force hard_refuse
+# regardless of what policy_rule_id and tier a decision would otherwise
+# resolve to. None of the nine cause classes above is itself
+# non-recoverable, so hard_refuse in this project is driven entirely by
+# these episode/runtime conditions, not by a class-level flag.
+hard_refuse_conditions:
+  - id: customer_opted_out
+    description: The customer has opted out of recovery contact.
+  - id: already_paid_elsewhere
+    description: The order shows a successful payment through another channel before this action would execute.
+  - id: episode_age_exceeds_cap
+    description: Episode age exceeds guardrails.max_episode_age_hours (72h).
+  - id: issuer_outage_cluster
+    description: >-
+      More than guardrails.outage_cluster_threshold episodes share cause
+      class C8 (issuer_bank_technical_error) within the current run's
+      rolling window — treated as a systemic issuer outage, not an
+      individually recoverable failure.

@@ -11,7 +11,7 @@ else
 	PIP := $(VENV_BIN)/pip
 endif
 
-.PHONY: setup doctor lint test clean data eval demo approve verify-audit verify-audit-tamper rollback harvest migrate db-check
+.PHONY: setup doctor lint test clean data eval demo approve verify-audit verify-audit-tamper rollback harvest migrate db-check config-check
 
 setup:
 	$(PYTHON311) -m venv .venv
@@ -64,3 +64,6 @@ migrate:
 
 db-check:
 	$(PY) -m src.db.migrate --check
+
+config-check:
+	$(PY) -m scripts.config_check
