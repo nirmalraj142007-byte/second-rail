@@ -145,3 +145,117 @@ in the missing value(s)` — no traceback, no partial file written to
 requirement on its own, but the >=20-record harvest, the field-existence
 report, the error-code snapshot, and the reference_id probe result all
 still need a real key before they can be anything but "not yet run."
+
+## D1 (night) — 25 Aug 2026
+
+Real keys arrived and I ran the actual harvest. `evidence/harvested_errors.jsonl`
+now has 20 real captured payment objects from live Razorpay test mode —
+the >=20 minimum, hit exactly. This entry is the honest account of how
+that went, which was not smoothly.
+
+**Before anything else: a credential-handling near-miss.** The first
+attempt to add keys put a real-looking secret into `.env.example` — a
+file that's tracked in git, not `.env`. I caught it before staging
+anything (`git status` showed it modified, nothing committed), reverted
+it with `git checkout -- .env.example`, and asked for the credentials to
+go into `.env` instead. The second attempt also had a mislabeled
+`RAZORPAY_KEY_ID` (literally the string `key_secret`) — I didn't try to
+guess which value was which and asked for the dashboard's actual Key ID
+instead. Worth a standing rule for this project: never assume a
+credential-shaped string is correctly labeled, and never let one sit in a
+tracked file even mid-conversation, even if it never gets `git add`ed.
+
+**Which test instruments actually produced failures, and which didn't:**
+
+- **Card — mechanically yes, semantically no.** All 8 documented "Error
+  Scenario" card numbers from the test-card docs went through checkout
+  and failed when Failure was clicked on the mock bank screen, exactly as
+  documented. But every one of them came back with the same generic
+  `error_code: BAD_REQUEST_ERROR`, `error_reason: payment_failed`,
+  `error_description: "Payment failed"` — not the specific reason each
+  card number is supposed to trigger (`insufficient_fund`,
+  `card_declined`, `authentication_failed`, etc.). I expected per-card
+  specificity and got a single generic gateway-authorization failure
+  instead, on 8/8 distinct real card numbers. This is now the headline
+  finding in `evidence/razorpay_field_report.md` — the kind of result
+  that's supposed to be reported as a headline, not quietly dropped.
+- **UPI — not available at all.** The checkout page for every UPI-planned
+  scenario offered Card, Netbanking, and Wallet, never UPI, on this
+  account. Confirmed directly (asked the person doing the manual checkout
+  what tabs were visible), not inferred. No amount of retrying the
+  checkout would have fixed this — it's an account-level thing, not a
+  per-request one. The 17 UPI-planned scenarios were completed via Card
+  instead (reusing the same 8 known numbers), which is why
+  `harvested_errors.jsonl` now writes `instrument`/`forced_by` from the
+  *real* `payment.method`/card/vpa/bank on each captured payment, with
+  the original plan kept alongside as `planned_instrument`/
+  `planned_forced_by` — the first version of this script conflated the
+  two and would have quietly mislabeled 12 real card payments as "upi."
+- **Netbanking — one real data point.** One UPI-planned link ended up
+  completed via Netbanking (bank code `CNRB`) before Card became the
+  fallback, and it returned a different reason, `payment_cancelled` —
+  the only record in the whole batch that isn't `payment_failed`. Not
+  enough data to draw a real pattern from, but it's genuine and it's in
+  the file.
+
+**Where my first hypothesis was wrong, a second time:** I assumed
+Razorpay's rate limiting on `POST /v1/payment_links` was a short,
+per-second thing my token bucket could ride out with a lower rate and a
+short retry backoff. It wasn't. At 2 rps, 14/26 scenario creations 429'd
+even after 4 retries; dropping to 0.5 rps got through 25/26, but the
+last link and the `reference_id` probe never recovered even after a
+90-second-spaced retry loop ran for 7.5 minutes and then a further ~30
+minutes of intermittent manual retries. The actual error body —
+`{"error": {"code": "BAD_REQUEST_ERROR", "description": "Too many
+requests"}}` — matches Razorpay's own documented generic rate-limit
+error, not a distinct "30 Payment Links per business" cap message, and
+cancelling an already-used link didn't free capacity to create a new
+one, which argues against the lifetime-cap theory and for a
+longer-than-expected time window instead — though I can't confirm the
+exact mechanism, only that it outlasted every wait I tried today. The
+uncomfortable possibility I didn't account for going in: my own retries,
+including the bounded backoff inside `RazorpayClient`, likely counted
+against whatever window Razorpay tracks, so repeatedly retrying a
+429'd endpoint may have been extending my own lockout rather than
+riding it out. I stopped retrying once I noticed this rather than keep
+digging.
+
+**The `reference_id` probe: attempted, not completed.** Every attempt
+this session hit the same 429 on its first `create_payment_link` call.
+Razorpay's own docs *state* the answer — `payment link creation with
+reference ID already attempted`, HTTP 400 — but this project has been
+explicit throughout that a documented answer is not the same as an
+empirically confirmed one, and I'm not going to blur that line just
+because the probe is inconvenient to finish today. It's fully built,
+persists its result the first time it succeeds
+(`evidence/harvest_probe_result.json`), and `evidence/razorpay_field_report.md`
+says exactly this — attempted with real credentials, still not
+answered — rather than the old placeholder that implied no key was
+available.
+
+**Also found, positively:** Payment Link responses carry an `order_id`
+field that is not in Razorpay's documented response schema for
+`POST /v1/payment_links`. That turned out to be the thing that made the
+whole harvest practical without asking anyone to hand back payment IDs
+by hand — every payment attempt against that order, captured or failed,
+is discoverable via `fetch_order_payments`, so the human-in-the-loop step
+is just "complete the checkout," nothing more.
+
+**A real-PII miss, caught before committing anything.** The Payment
+entity also carries `email` and `contact` — whatever the person
+completing checkout typed into the required contact fields. 19 of the 20
+checkouts used made-up values, but one used a real phone number, which
+means it was sitting in `evidence/harvest_manifest.json` and
+`evidence/harvested_errors.jsonl` on disk — files this project commits
+to a public repo. `git status` confirmed neither had been staged yet, so
+nothing was ever at risk of landing in history, but the files existed
+with real PII in them before I checked. Added `_redact_pii` in
+`scripts/harvest_errors.py` (redacts `email`, `contact`, and `vpa` to
+`"[redacted]"` at the moment a payment is captured, not just before
+writing the JSONL — so the manifest never holds it either) and
+retroactively scrubbed the two files already on disk. This should have
+been part of the original design, not a patch after the fact — anywhere
+this project reads back a real customer-facing field from a live
+Razorpay object, redaction needs to happen at the capture boundary, by
+default, not as something I remember to add when I notice the field
+exists.

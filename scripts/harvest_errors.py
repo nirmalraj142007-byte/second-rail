@@ -309,13 +309,34 @@ def _backfill_order_ids(client: RazorpayClient, manifest: list[dict[str, Any]]) 
             entry["order_id"] = link.get("order_id")
 
 
+# Fields on the Payment entity that can carry a real customer's contact
+# details, entered by whoever completes the checkout. This project commits
+# evidence/harvested_errors.jsonl to a public repo, so no value entered
+# during a real checkout — even a harvest researcher's own number, typed in
+# because the field is required — ever gets stored past this point. Only
+# the taxonomy-relevant error fields and instrument metadata this harvest
+# exists to capture are exempt from redaction.
+_PII_FIELDS = ("email", "contact", "vpa")
+
+
+def _redact_pii(payment: dict[str, Any]) -> dict[str, Any]:
+    redacted = dict(payment)
+    for field in _PII_FIELDS:
+        if redacted.get(field):
+            redacted[field] = "[redacted]"
+    upi = redacted.get("upi")
+    if isinstance(upi, dict) and upi.get("vpa"):
+        redacted["upi"] = {**upi, "vpa": "[redacted]"}
+    return redacted
+
+
 def _fetch_completed(client: RazorpayClient, manifest: list[dict[str, Any]]) -> None:
     for entry in manifest:
         if entry["raw_payment"] is not None:
             continue
         if entry["payment_id"]:
             try:
-                entry["raw_payment"] = client.fetch_payment(entry["payment_id"])
+                entry["raw_payment"] = _redact_pii(client.fetch_payment(entry["payment_id"]))
             except ExecutorError as exc:
                 print(f"  ! failed to fetch {entry['payment_id']}: {exc}", file=sys.stderr)
             continue
@@ -326,10 +347,43 @@ def _fetch_completed(client: RazorpayClient, manifest: list[dict[str, Any]]) -> 
                 print(f"  ! failed to fetch payments for {entry['order_id']}: {exc}", file=sys.stderr)
                 continue
             if payments:
-                payment = payments[-1]
+                payment = _redact_pii(payments[-1])
                 entry["payment_id"] = payment.get("id")
                 entry["raw_payment"] = payment
                 print(f"  discovered {payment.get('id')} for {entry['reference_id']} (auto, via order_id)")
+
+
+# (token_iin, last4) -> the verbatim documented card number string, so a
+# captured payment can be traced back to the exact card Razorpay's own docs
+# list, rather than reconstructed by guessing digit grouping from last4.
+_KNOWN_CARDS = {
+    (c["card_number"].replace(" ", "")[:9], c["card_number"].replace(" ", "")[-4:]): c["card_number"]
+    for c in CARD_SCENARIOS
+}
+
+
+def _real_forced_by(payment: dict[str, Any]) -> str | None:
+    """The instrument string actually used, read back from the real payment
+    object — not the scenario's plan. Plans and reality diverged in this
+    harvest (UPI wasn't available on the account; several UPI-planned
+    scenarios ended up completed via card or netbanking instead), so only
+    the payment object itself can say what really forced the failure.
+    """
+    method = payment.get("method")
+    if method == "card":
+        card = payment.get("card") or {}
+        key = (card.get("token_iin"), card.get("last4"))
+        known = _KNOWN_CARDS.get(key)
+        if known:
+            return known
+        return f"card ending {card.get('last4')} (iin {card.get('token_iin')}, not one of the documented scenario cards)"
+    if method == "upi":
+        return payment.get("vpa")
+    if method == "netbanking":
+        return payment.get("bank")
+    if method == "wallet":
+        return payment.get("wallet")
+    return None
 
 
 def _write_harvested(manifest: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -342,8 +396,8 @@ def _write_harvested(manifest: list[dict[str, Any]]) -> list[dict[str, Any]]:
             {
                 "harvest_id": str(ULID()),
                 "captured_at": datetime.now(IST).isoformat(timespec="seconds"),
-                "forced_by": entry["forced_by"],
-                "instrument": entry["instrument"],
+                "forced_by": _real_forced_by(payment),
+                "instrument": payment.get("method"),
                 "payment_id": payment.get("id"),
                 "amount_paise": payment.get("amount"),
                 "error_code": payment.get("error_code"),
@@ -351,6 +405,9 @@ def _write_harvested(manifest: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "error_source": payment.get("error_source"),
                 "error_step": payment.get("error_step"),
                 "error_reason": payment.get("error_reason"),
+                "planned_instrument": entry["instrument"],
+                "planned_forced_by": entry["forced_by"],
+                "planned_error_reason": entry["expected_error_reason"],
                 "raw_payment": payment,
             }
         )
@@ -458,6 +515,46 @@ def _write_field_report(probe: dict[str, Any] | None, records: list[dict[str, An
     )
     lines.append(f"docs page as of {FETCH_DATE}.")
     lines.append("")
+    lines.append("## Steps 2 & 3 — forcing failures: what actually happened")
+    lines.append("")
+    if n == 0:
+        lines.append("Not yet run.")
+    else:
+        lines.append(
+            "**UPI was not available as a payment method on this test account.** Every UPI-planned "
+            "scenario's checkout page offered Card, Netbanking, and Wallet only — confirmed by direct "
+            "observation, not inferred from a missing field. This is the honest, documented-gap outcome "
+            "the harvest plan allows for: rather than invent a UPI payment, every UPI-planned link that "
+            "got completed was completed via whichever real method was actually offered, and the "
+            "`instrument`/`forced_by` fields below record what really happened, not what was planned "
+            "(see `planned_instrument`/`planned_forced_by` on each record for the original intent)."
+        )
+        lines.append("")
+        instruments = sorted({r["instrument"] for r in records})
+        reasons = sorted({r["error_reason"] for r in records if r["error_reason"]})
+        lines.append(f"- Real instruments captured: {', '.join(instruments)}")
+        lines.append(f"- Distinct `error_reason` values across all {n} records: {', '.join(reasons)}")
+        lines.append("")
+        card_records = [r for r in records if r["instrument"] == "card"]
+        card_reasons = {r["error_reason"] for r in card_records}
+        distinct_cards = sorted({r["forced_by"] for r in card_records if r["forced_by"]})
+        if card_records and len(card_reasons) == 1:
+            lines.append(
+                f"**Finding that shrinks the harvest's own premise:** all {len(card_records)} card "
+                f"payments were forced using one of the {len(distinct_cards)} distinct documented "
+                "\"Error Scenario\" card numbers from Razorpay's test-card docs (each reused across "
+                "multiple checkouts — see the `forced_by` field on each record for exactly which "
+                "number produced which payment), completed by clicking Failure on the mock bank "
+                f"screen as instructed. Every one of them came back with the same generic "
+                f"`error_reason: \"{next(iter(card_reasons))}\"` rather than the specific documented "
+                "reason its card number is supposed to trigger (e.g. `insufficient_fund`, "
+                "`card_declined`, `authentication_failed`, ...). On this account, at least, the "
+                "per-card-number error mapping documented on the test-card page does not reproduce — "
+                "the mock bank's Failure button appears to always return the same generic gateway "
+                "authorization failure regardless of which of the 8 cards initiated it. This was not "
+                "the expected result going in."
+            )
+        lines.append("")
     lines.append("## Step 4 — field existence, from real captured payment objects")
     lines.append("")
     if n == 0:
@@ -477,7 +574,21 @@ def _write_field_report(probe: dict[str, Any] | None, records: list[dict[str, An
     lines.append("## Step 5 — reference_id duplicate-rejection probe")
     lines.append("")
     if probe is None:
-        lines.append("Not yet run — requires live Razorpay test-mode credentials.")
+        lines.append(
+            "**Attempted with real credentials, not yet completed.** Every attempt this session hit "
+            "`HTTP 429 {\"error\": {\"code\": \"BAD_REQUEST_ERROR\", \"description\": \"Too many "
+            "requests\"}}` on the probe's first `create_payment_link` call — the same undocumented "
+            "rate limit that slowed the main harvest (see BUILD_LOG.md for the full account). "
+            "Cancelling an already-used link did not free capacity, which argues against this being "
+            "the documented \"30 Payment Links per business\" cap specifically and for it being a "
+            "time-windowed limit instead — but that is inference, not a confirmed mechanism. "
+            "Razorpay's own Payment Links \"Create\" error list documents `payment link creation "
+            "with reference ID already attempted` as a 400 response to a duplicate `reference_id`, "
+            "which is the expected answer once this probe can actually run — but that is the "
+            "documented answer, not yet the empirically confirmed one, and this project does not "
+            "treat those as interchangeable. Re-run `make harvest` later to complete it; the result "
+            "will be persisted to evidence/harvest_probe_result.json the first time it succeeds."
+        )
     else:
         lines.append(f"- reference_id used: `{probe['reference_id']}`")
         lines.append(f"- **Result: {probe['outcome']}**")
