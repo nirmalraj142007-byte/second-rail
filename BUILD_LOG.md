@@ -455,3 +455,64 @@ as every prior phase) prints all 8 PASS lines; `wc -l
 config/guardrails.yaml` is 16; `ruff check` is clean; all 32 tests pass
 (6 pre-existing suites plus the 6 new cases in
 `tests/test_config_artifacts.py`).
+
+## D2 (night) — 26 Aug 2026
+
+Phase 5: `data/generator.py`, `scripts/seal.py`, `scripts/holdout_guard.py`,
+`tests/test_generator.py`, `tests/test_holdout_guard.py`, plus an
+`outcome_model.md` §2 appendix and `generation_weight` /
+`response_base_rate` fields on every `config/taxonomy.yaml` class (own
+commit, since neither the cause mix nor the sealed labels' response draw
+can run without concrete numbers, and the amendment policy says corrections
+go in a dated appendix, not a silent edit).
+
+**Where the first attempt was wrong.** The phase brief's own acceptance
+test checks "at least 10 distinct `error_description` values in sealed
+absent from train." Wrote the generator against that literally first, then
+ran it against the real 20-record harvest file and got nowhere near 10 —
+because Phase 4's own ratified `config/taxonomy.yaml` header already
+established that 19 of those 20 records share one generic
+`error_description` ("Payment failed"). Only two distinct description
+strings exist in the whole harvest set; no partition of it can produce 10
+sealed-only values on that field, regardless of how the generator is
+written. The field that actually identifies a distinct verbatim record is
+`harvest_id` — that's what `SEALED_ONLY_HARVEST_IDS` reserves 11 of (10
+required, 11 picked for margin) and what the test and `holdout/SHIFT.md`
+check against instead. Flagged as a deliberate deviation in the commit
+message rather than silently swapping the field and hoping nobody asks —
+this is the same finding from Phase 4's anchoring problem showing up again
+in a different acceptance test.
+
+**A second false positive worth naming, not fixing.** The DoD's own
+suggested PII check — `grep -rnE "\+?[0-9]{10}" data/ holdout/` — matches
+`customers.jsonl` even though the file has no phone numbers, because a
+sha256 hex digest is 64 characters of `[0-9a-f]` and a 10-digit run inside
+one is common by chance, not a leak. `contact_hash` and `email_hash` are
+exactly what DPDP compliance requires here (no raw contact info stored at
+all), so the fix is not to change the hash format — it's to check the
+right thing. `tests/test_generator.py` asserts no phone/email pattern
+appears in any *non-hash* field, and separately asserts the hash fields
+really are 64-char hex, not a phone number that happens to satisfy the
+same regex.
+
+The other three DoD items were mechanical once the harvest_id decision was
+made: `TRAIN_ISSUER_FAMILIES` (6) vs. `BANK_E` (sealed-only, weighted at
+20% of sealed episodes so it's reliably present, not just probable); the
+sealed lognormal median shifted +20% over train's (both drawn from
+`random.Random.lognormvariate`, no numpy); and the ten seeded edge cases,
+each built as one (or, for `issuer_outage_cluster` and
+`frequency_cap_trip`, many) explicitly-constructed episode rather than
+hoped for from the random draw, so the count table is exact every run, not
+just likely.
+
+Verified: `make data && make seal && make verify-seal` all exit 0 and
+print the one-line "sealed split verified — 200 episodes, sha256:…"
+`make data` run twice produces byte-identical `holdout/sealed.jsonl`
+(same sha256 both times). Edge-case count table: nine cases at 1
+(`frequency_cap_trip` at 3), `issuer_outage_cluster` at exactly 40.
+`grep -rn "held-out test set" .` returns nothing outside
+`second-rail-build-blueprint.md`, which quotes the judge's original
+critique verbatim and predates this phase — left untouched rather than
+scrubbed, since it's the historical record of the problem being solved,
+not a claim this codebase makes about itself. `ruff check` clean; all 49
+tests pass (32 pre-existing plus 17 new across the two Phase 5 suites).
