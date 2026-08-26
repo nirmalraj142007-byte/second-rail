@@ -1,0 +1,154 @@
+# Second Rail — cause taxonomy (PROVISIONAL, pre-harvest structure)
+#
+# This version exists to fix the taxonomy's shape — class count, field
+# structure, the regex/anchor convention — before it gets ratified against
+# evidence/harvested_errors.jsonl in the next commit. Every anchor below
+# cites evidence/razorpay_error_codes_snapshot.md (source: doc) because at
+# this point in the build the harvest file has not yet been cross-checked
+# field-by-field against these labels. No anchor_error_strings entry here
+# carries a harvest_id — that is precisely what the ratification commit
+# adds, and `make config-check`'s verbatim-anchor check will fail on this
+# version, on purpose, until that happens.
+#
+# Nine classes, chosen to match the structure outcome_model.md §2 already
+# pre-committed to ("the nine-class taxonomy gets frozen against harvested
+# Razorpay error strings").
+
+classes:
+  - class_id: C1
+    label: insufficient_funds
+    definition: >-
+      The customer's account or instrument did not have enough balance to
+      complete the payment at authorization time.
+    recoverable_in_principle: true
+    source: doc
+    anchor_error_strings:
+      - error_code: BAD_REQUEST_ERROR
+        error_description: >-
+          Your payment could not be completed due to insufficient account
+          balance. Try another card or payment method.
+    regex_patterns:
+      - "(?i)insufficient[_\\s]?fund(s)?"
+
+  - class_id: C2
+    label: issuer_declined
+    definition: >-
+      The issuing bank or wallet refused the instrument itself — declined,
+      disabled for online use, or blocked — independent of any customer
+      data-entry mistake.
+    recoverable_in_principle: true
+    source: doc
+    anchor_error_strings:
+      - error_code: BAD_REQUEST_ERROR
+        error_description: >-
+          Your payment did not go through as it was declined by the bank.
+          Try another payment method or contact your bank.
+    regex_patterns:
+      - "(?i)declined by the bank|disabled for online payments|instrument.*blocked"
+
+  - class_id: C3
+    label: invalid_entered_details
+    definition: >-
+      The customer entered a static credential incorrectly or never set it
+      up (card number, UPI PIN) — a data-entry problem, not an instrument
+      health problem.
+    recoverable_in_principle: true
+    source: doc
+    anchor_error_strings:
+      - error_code: BAD_REQUEST_ERROR
+        error_description: You have entered an incorrect card number. Try again.
+    regex_patterns:
+      - "(?i)incorrect card number|pin.*not set|invalid card"
+
+  - class_id: C4
+    label: authentication_failed
+    definition: >-
+      Dynamic authentication (OTP, 3DS challenge) failed at the moment of
+      payment — distinct from a wrong static PIN.
+    recoverable_in_principle: true
+    source: doc
+    anchor_error_strings:
+      - error_code: BAD_REQUEST_ERROR
+        error_description: >-
+          Your payment could not be completed due to incorrect OTP or
+          verification details. Try another payment method or contact your
+          bank for details.
+    regex_patterns:
+      - "(?i)authentication failed|incorrect otp|verification details"
+
+  - class_id: C5
+    label: limit_or_attempts_exceeded
+    definition: >-
+      A transaction amount limit, transaction frequency limit, or PIN
+      attempt limit was hit — recoverable, but only after the limit window
+      resets, not on immediate retry.
+    recoverable_in_principle: true
+    source: doc
+    anchor_error_strings:
+      - error_code: BAD_REQUEST_ERROR
+        error_description: >-
+          Payment was unsuccessful as you exceeded the amount limit for the
+          day with this bank account. Try using another account.
+    regex_patterns:
+      - "(?i)limit exceeded|attempts exceeded|frequency limit"
+
+  - class_id: C6
+    label: customer_abandoned
+    definition: >-
+      The customer actively cancelled or declined the payment request
+      mid-flow rather than the payment failing technically.
+    recoverable_in_principle: true
+    source: doc
+    anchor_error_strings:
+      - error_code: BAD_REQUEST_ERROR
+        error_description: >-
+          Your payment has been cancelled. Try again or complete the
+          payment later.
+    regex_patterns:
+      - "(?i)cancelled|declined the payment"
+
+  - class_id: C7
+    label: payment_timed_out
+    definition: >-
+      A transient timeout with no fault attributable to the instrument or
+      the customer.
+    recoverable_in_principle: true
+    source: doc
+    anchor_error_strings:
+      - error_code: BAD_REQUEST_ERROR
+        error_description: >-
+          Your payment could not be completed due to a temporary issue. Try
+          again later.
+    regex_patterns:
+      - "(?i)time.?out|temporary issue"
+
+  - class_id: C8
+    label: issuer_bank_technical_error
+    definition: >-
+      A technical fault on the gateway or issuing bank's side — the
+      candidate cause class for the issuer-outage hard-refusal cluster.
+    recoverable_in_principle: true
+    source: doc
+    anchor_error_strings:
+      - error_code: GATEWAY_ERROR
+        error_description: >-
+          Your payment did not go through due to a temporary issue. Any
+          debited amount will be refunded in 4-5 business days.
+    regex_patterns:
+      - "(?i)technical error|gateway.*error"
+
+  - class_id: C9
+    label: device_or_app_unreachable
+    definition: >-
+      The customer's UPI app or device could not be reached to complete
+      authentication — a device/app-availability problem, distinct from a
+      bank-side outage.
+    recoverable_in_principle: true
+    source: doc
+    anchor_error_strings:
+      - error_code: GATEWAY_ERROR
+        error_description: >-
+          Payment was unsuccessful as the UPI app is not reachable at this
+          time.
+    regex_patterns:
+      - "(?i)not (be )?registered|app is not reachable|invalid device"

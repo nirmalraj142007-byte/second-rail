@@ -371,3 +371,16 @@ machine's OneDrive-synced working directory — worth knowing about for
 the demo, since a slow disk under fsync pressure is a real, visible
 thing on camera, but it's the write path, not the verify path the phase
 actually budgets.
+
+## D2 (evening) — 26 Aug 2026
+
+Phase 4, first commit: `config/taxonomy.yaml`, provisional. Nine classes,
+matching the shape `outcome_model.md` §2 already pre-committed to before
+this phase started. Anchors at this stage cite
+`evidence/razorpay_error_codes_snapshot.md` only (`source: doc`) — no
+`harvest_id`, deliberately, since the point of this commit is to fix the
+taxonomy's *shape* (field structure, class count, the regex/anchor
+convention) before the next commit cross-checks every anchor string
+against the real harvest file field-by-field. `make config-check` is
+expected to fail against this version — that's the intended signal that
+ratification hasn't happened yet, not a bug in the checker.
