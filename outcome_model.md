@@ -146,4 +146,67 @@ text above stays untouched so git history shows the actual sequence of
 assumptions, not a cleaned-up final version presented as if it were always
 correct.
 
-No appendix entries yet.
+## Appendix — 2026-08-26: §2 response-probability parameters filled in (Phase 5)
+
+Phase 4 (`config/taxonomy.yaml` ratification, commits `55d39c5` /
+`f67d9ad`) fixed the nine cause-class names but did not fill this
+section's `TBD` cells — that commit closed the class-*identity* question
+only. Phase 5 (`data/generator.py`) is the first place a concrete number
+is needed, because `holdout/labels.jsonl` has to record a simulated
+customer-response draw per sealed episode. This entry fills the `TBD`
+cells using exactly the reasoning method §2 already committed to, and
+nothing else — no new column, no new logic.
+
+**Base response rate per cause class** (transient/technical causes get a
+higher rate; intent- or limit-related causes get a lower one, per the
+reasoning method above):
+
+| cause_class | label | base_rate | reasoning |
+|---|---|---|---|
+| C7 | payment_timed_out | 0.70 | Purest transient cause — nothing about the instrument or customer is implicated. |
+| C8 | issuer_bank_technical_error | 0.65 | Upstream fault, same reasoning as C7, one notch down because the fault sits at the bank rather than the immediate connection. |
+| C4 | authentication_failed | 0.60 | A single OTP/3DS miss is usually a one-off, not a standing problem. |
+| C9 | device_or_app_unreachable | 0.55 | Device/app reachability is usually transient but ties recovery to the customer fixing something on their end first. |
+| C3 | invalid_entered_details | 0.50 | Fixable data-entry mistake, but requires the customer to notice and correct it. |
+| C1 | insufficient_funds | 0.45 | Recoverable in principle, but requires funds to actually become available. |
+| C5 | limit_or_attempts_exceeded | 0.35 | Recoverable only after a limit window resets — the customer can't act immediately even if willing. |
+| C2 | issuer_declined | 0.30 | The instrument itself is impaired; retrying anything is less likely to help without switching instruments. |
+| C6 | customer_abandoned | 0.20 | Intent-related — the customer chose to stop. Lowest assumed rate in the table. |
+
+These are the same `response_base_rate` values now committed per class in
+`config/taxonomy.yaml`, alongside the pre-existing `generation_weight`
+field `data/generator.py` uses for the cause mix. Both are declared
+illustrative in that file's own header, same as this table.
+
+**Segment multiplier** (high_value > repeat > first_time, per §2's
+reasoning): first_time ×0.85, repeat ×1.00, high_value ×1.15.
+
+**Amount-band decay** (probability falls as amount rises, per §2's
+reasoning): rather than introduce a fourth banding scheme alongside the
+low/mid/high sketch in §2's original table, this reuses
+`config/policy_table.yaml`'s three amount bands (A1/A2/A3) — the same
+bands the policy engine already resolves every episode into, so
+`data/generator.py` doesn't maintain a second boundary set. A1 ×1.00, A2
+×0.85, A3 ×0.65.
+
+**Formula:**
+
+```
+response_probability = clip(
+    base_rate[cause_class] * segment_multiplier[segment] * amount_decay[amount_band],
+    0.02, 0.95,
+)
+```
+
+The 0.02/0.95 floor and ceiling exist so no cell is ever a hard 0% or
+100% — consistent with §5's disclosure that no cell is measured, every
+cell is a formula output. The full 9 × 3 × 3 = 81-cell table §2 sketched
+is derivable from this formula on demand; it is not transcribed here.
+
+**What changed and why:** only the `TBD` cells in §2's table are
+resolved, via the parameters above — the original table's illustrative 9
+rows are superseded by this formula, which covers the same 9
+(segment, amount_band) shape once a cause class's base rate is
+substituted in. §2's text above this appendix is left untouched, per the
+amendment policy in §6. This does not change the attribution window (§3)
+or the false-positive cost model (§4).
