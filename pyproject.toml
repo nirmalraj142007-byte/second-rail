@@ -18,6 +18,10 @@ known-first-party = ["src", "scripts", "data"]
 # the `X | None = typer.Option(None, ...)` shape, not typer's `list[...]`
 # or `Path`-typed options, both used by --source and --customers below.
 "src/runner.py" = ["B008"]
+"scripts/demo.py" = ["B008"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "live: requires real Razorpay test-mode credentials, hits the network",
+]

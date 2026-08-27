@@ -51,8 +51,12 @@ eval:
 gate-run:
 	$(PY) -m src.runner --gate-only
 
+# EXECUTE=1 turns on real Razorpay calls; LIMIT=N caps the episode count.
+# Both are bare make-variable values (not flags) — translated into the
+# script's --execute / --limit flags here so `make demo` alone stays a
+# plain, flagless dry-run.
 demo:
-	@echo "not yet built — phase 8/9 (make demo)"
+	$(PY) -m scripts.demo $(if $(EXECUTE),--execute) $(if $(LIMIT),--limit $(LIMIT))
 
 approve:
 	@echo "not yet built — phase 8 (make approve)"
@@ -67,7 +71,7 @@ verify-audit-tamper:
 	$(PY) -m src.audit.verify --tamper-test
 
 rollback:
-	@echo "not yet built — phase 8 (make rollback)"
+	$(PY) -m src.execute.rollback --run-id $(RUN_ID)
 
 harvest:
 	$(PY) -m scripts.harvest_errors

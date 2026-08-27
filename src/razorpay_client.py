@@ -156,6 +156,25 @@ class RazorpayClient:
         body = {**payload, "reference_id": reference_id}
         return self._request("POST", "/payment_links", json=body)
 
+    def create_payment_link_once(
+        self, payload: dict[str, Any], reference_id: str
+    ) -> tuple[int, Any]:
+        """Single HTTP attempt, no internal retry — returns (status_code, body).
+
+        src/execute/retry.py owns the retry/backoff for Payment Link creation
+        specifically, because the executor's audit record must show each
+        attempt and delay individually (JG-13/E-04). _request()'s own retry
+        loop sleeps internally and would hide that detail, so this bypasses
+        it: one request, whatever comes back, no sleep, no raise on non-2xx.
+        """
+        self._bucket.acquire()
+        body = {**payload, "reference_id": reference_id}
+        try:
+            response = self._client.request("POST", "/payment_links", json=body)
+        except httpx.TransportError as exc:
+            return 0, {"transport_error": str(exc)}
+        return response.status_code, _safe_json(response)
+
     def cancel_payment_link(self, plink_id: str) -> dict[str, Any]:
         return self._request("POST", f"/payment_links/{plink_id}/cancel")
 

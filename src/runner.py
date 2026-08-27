@@ -51,7 +51,7 @@ from src.db.repo import (
     insert_gate_check,
     start_run,
 )
-from src.errors import DuplicateEventError
+from src.errors import DuplicateEventError, ExecutorError
 from src.gate.checks import Episode, GateContext, RunState
 from src.gate.engine import GateDecision, GateEngine, cluster_sizes, compute_cluster_membership
 from src.gate.stopping import REASON_CLUSTER_ESCALATION, StoppingRules
@@ -254,7 +254,54 @@ class Runner:
             )
 
             if decision.eligible:
-                by_outcome["pending"] += 1
+                # If an executor is wired in, call it; otherwise stay in pending
+                # (diagnose/choose land in later phases and will supply the
+                # real action + policy_rule_id in place of these placeholders).
+                if self._executor is not None:
+                    execution_outcome: str | None = None
+                    try:
+                        result = self._executor.create_recovery_link(
+                            episode=episode,
+                            action="placeholder_action",
+                            policy_rule_id="P-00",
+                            run_id=run_id,
+                        )
+                    except ExecutorError as e:
+                        self._logger.error("executor failed for %s: %s", episode.payment_id, e)
+                        by_outcome["execution_failed"] += 1
+                        state.consecutive_executor_errors += 1
+                        insert_exception_entry(
+                            self._conn,
+                            exception_id=str(ULID()),
+                            run_id=run_id,
+                            episode_id=episode.episode_id,
+                            stage="execute",
+                            reason_code="executor_error",
+                            reason_text=str(e),
+                        )
+                    else:
+                        state.consecutive_executor_errors = 0
+                        if result.status == "created":
+                            by_outcome["actioned"] += 1
+                        else:
+                            by_outcome["pending"] += 1
+                        execution_outcome = result.status
+                        self._audit.append(
+                            stage="execute",
+                            actor="agent",
+                            episode_id=episode.episode_id,
+                            payment_id=episode.payment_id,
+                            outcome=execution_outcome,
+                            execution={
+                                "api": "payment_links",
+                                "idempotency_key": result.idempotency_key,
+                                "plink_id": result.plink_id,
+                                "response_code": result.response_code,
+                            },
+                        )
+                else:
+                    by_outcome["pending"] += 1
+
                 state.exposure_committed_paise += episode.amount_paise
                 state.total_eligible_contacts_this_run += 1
                 if episode.customer_id:

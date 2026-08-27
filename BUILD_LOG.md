@@ -657,3 +657,78 @@ clean; all 70 tests pass (56 pre-existing plus 14 new across
 `test_gate.py` and `test_llm_boundary.py`). `make` itself still isn't on
 this Windows/git-bash shell (same as Phase 6) — ran the `python -m
 src.runner` command the Makefile's `gate-run` target wraps, directly.
+
+## D4 (later) — 27 Aug 2026
+
+Phase 8: the executor. `src/execute/{idempotency,retry,executor,rollback}.py`,
+`tests/test_executor.py`, `scripts/demo.py`, plus a `create_payment_link_once`
+addition to `src/razorpay_client.py` and a `Runner` wiring change in
+`src/runner.py` so an injected executor actually gets called for eligible
+episodes.
+
+**Where the first hypothesis was wrong.** Assumed the live acceptance test
+would just work — real keys are already in `.env` from Phase 1's harvest —
+and every attempt to create a real test-mode Payment Link came back `HTTP
+429` immediately, on the very first attempt, every single time, regardless
+of the self-imposed 0.5 rps client-side throttle already in
+`razorpay_client.py`. First hypothesis was that my own retry/backoff logic
+was somehow firing too fast or double-retrying (the executor's
+`with_backoff` wraps a client call that, before this phase, had its *own*
+internal retry loop too — genuinely a bug, fixed by adding
+`create_payment_link_once()`, a single-attempt method with no internal
+sleep, so the executor's hand-rolled backoff is the only retry layer and
+every attempt/delay is visible in the audit record instead of hidden
+inside the client). But fixing that didn't fix the 429s. Bypassed all of
+this project's code entirely and fired one raw `create_payment_link_once`
+call directly from a throwaway script — still 429, immediately. The
+response body was the answer: `{"code": "RATE_LIMIT_EXCEEDED",
+"description": "test mode limit of 30 reached for payment_link"}`. This is
+not a rate limit at all — it's Razorpay's documented hard cap of 30
+Payment Links per test-mode account, already exhausted by Phase 1's
+harvest work (forcing failures via the checkout page necessarily creates
+Payment Links or orders along the way). `evidence/razorpay_field_report.md`
+had flagged this exact possibility as an open question ("this account, at
+least... argues against this being the documented '30 Payment Links per
+business' cap specifically... but that is inference, not a confirmed
+mechanism") — it's now confirmed, verbatim, in the API's own error
+description. Updated that file with the confirmed finding rather than
+leaving the old speculative wording standing.
+
+**Consequence, stated plainly rather than worked around.** With the cap
+exhausted, no *new* real Payment Link can be created on this account until
+Razorpay resets it (documented reset window not found — flagged in
+`LIMITATIONS.md`). The acceptance test's "three real `plink_` IDs" step
+cannot be demonstrated live right now. What *is* demonstrated live, on the
+real API, against the real 429: the hand-rolled backoff firing at 1s → 2s
+→ 4s (the three delays visible in the terminal output and, per-attempt, in
+the audit record), the retry cap stopping at 3 attempts rather than
+hammering, and the episode landing in `execution_failed` /
+`exception_entry` rather than crashing the batch or silently vanishing —
+which is the exact behavior the phase's fault-injection acceptance test
+also asks for, just triggered by a real account limit instead of a
+synthetic one. All idempotency, duplicate-suppression, and rollback logic
+is covered by `tests/test_executor.py` against a mocked client (14 tests,
+all passing) and does not depend on the live cap being available. The
+`@pytest.mark.live` test in that file will legitimately skip or fail under
+the current cap — that is expected, not a bug, and is exactly why it is
+marked `live` and excluded from the default `pytest -m "not live"` run
+that `make eval` and CI-equivalent checks use.
+
+Also fixed, while implementing: the executor originally hardcoded
+`cap=3, delays=[1.0, 2.0, 4.0]` instead of reading `executor_retry_cap` /
+`executor_backoff_seconds` from `config/guardrails.yaml` — caught before
+this file's own non-negotiable ("every money-adjacent threshold lives in
+config, not code") got violated, even though the hardcoded numbers
+happened to match the config values exactly. `RazorpayExecutor` now takes
+`retry_cap`/`retry_delays` as constructor arguments; `scripts/demo.py`
+passes them from the loaded config bundle.
+
+Verified: 85 tests pass (`pytest -q -m "not live"`, 70 pre-existing plus
+15 new/changed in `test_executor.py`); dry-run (`python -m scripts.demo`,
+no flags) confirmed to make zero HTTP calls by monkeypatching
+`httpx.Client.request` to raise — ran clean over all 600 episodes,
+`episode_count=600 == actioned(2) + suppressed(45) + execution_failed(0) +
+pending(553)`; `--execute --limit 3` against the real API produced the
+429/backoff/exception-list behavior described above, confirmed via a raw
+single-call probe that the cause is the account's exhausted 30-link cap,
+not a bug in this code.
