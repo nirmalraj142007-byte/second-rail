@@ -19,6 +19,41 @@ import sqlite3
 from src.errors import DuplicateEventError, IdempotencyCollision
 
 
+def insert_customer_if_absent(
+    conn: sqlite3.Connection,
+    *,
+    customer_id: str,
+    synthetic_name: str | None,
+    contact_hash: str,
+    email_hash: str | None,
+    segment: str | None,
+    opted_out: bool,
+    opt_out_ts: str | None,
+    created_at: str,
+) -> None:
+    """INSERT OR IGNORE — customers are loaded fresh from data/customers.jsonl
+    on every `make gate-run`, and a re-run against an un-reset database must
+    not crash on the customer_id PRIMARY KEY."""
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO customer (
+            customer_id, synthetic_name, contact_hash, email_hash, segment,
+            opted_out, opt_out_ts, created_at
+        ) VALUES (?,?,?,?,?,?,?,?)
+        """,
+        (
+            customer_id, synthetic_name, contact_hash, email_hash, segment,
+            int(opted_out), opt_out_ts, created_at,
+        ),
+    )
+    conn.commit()
+
+
+def get_opted_out_customer_ids(conn: sqlite3.Connection) -> frozenset[str]:
+    rows = conn.execute("SELECT customer_id FROM customer WHERE opted_out = 1").fetchall()
+    return frozenset(row["customer_id"] for row in rows)
+
+
 def insert_episode(
     conn: sqlite3.Connection,
     *,

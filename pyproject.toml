@@ -13,6 +13,11 @@ known-first-party = ["src", "scripts", "data"]
 # Verbatim Razorpay doc strings — reflowing them would violate "verbatim
 # means verbatim" (see the module docstring in scripts/harvest_errors.py).
 "scripts/harvest_errors.py" = ["E501"]
+# typer.Option(...) as a parameter default is the library's own required
+# API surface, not a mutable-default bug — ruff's B008 only special-cases
+# the `X | None = typer.Option(None, ...)` shape, not typer's `list[...]`
+# or `Path`-typed options, both used by --source and --customers below.
+"src/runner.py" = ["B008"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

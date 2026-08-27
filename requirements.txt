@@ -10,3 +10,4 @@ rich==13.9.4
 PyYAML==6.0.2
 python-ulid==2.7.0
 matplotlib==3.9.2
+tzdata==2026.3

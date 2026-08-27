@@ -580,3 +580,80 @@ correctly produced zero episodes and one `exception_entry` row with
 `reason_code="SCHEMA_DRIFT_FIELD_MISSING"` instead); `make verify-audit`
 equivalent → `chain intact — 2006 records`. `ruff check` clean; all 56
 tests pass (49 pre-existing plus 7 new in `test_ingest.py`).
+
+## D4 — 27 Aug 2026
+
+Phase 7: the deterministic gate. `src/gate/{checks,engine,stopping}.py`,
+`src/runner.py` (the batch orchestrator every later phase plugs into),
+`tests/test_gate.py`, `tests/test_llm_boundary.py`, plus small additions
+to `src/db/repo.py` (`insert_customer_if_absent`,
+`get_opted_out_customer_ids`). `make gate-run` processes 600 episodes with
+zero LLM calls and zero network calls, per the phase's own hard rule —
+`test_llm_boundary.py` enforces it by grepping `src/gate/`, `src/audit/`,
+`src/ingest/`, `src/db/` (and `src/execute/`/`src/attribute/` once they
+exist) for the LLM client symbol and `"openai"|"genai"|"anthropic"`.
+
+**Where the first hypothesis was wrong — the bigger one.** First version
+of `Runner.run()` used a single fixed instant (`data.generator.REFERENCE_NOW`,
+the generator's own reference timestamp) as "now" for every episode in a
+600-episode batch, on the assumption that a byte-identical, reproducible
+batch replay needed a byte-identical clock. Ran it, and the tier
+breakdown came back `{'hard_refuse': 47}` — no `auto`, no
+`human_keystroke` at all, which fails the phase's own acceptance check
+that all three escalation tiers appear in the audit log. The cause wasn't
+a bug in `check_episode_age` — it was a bad assumption about what "now"
+should mean for a batch. `data/generator.py` draws each episode's
+`failed_at` uniformly across a 30-day window; measuring every one of them
+against a single instant near the *end* of that window meant ~90% of the
+batch was "more than 72 hours old" by construction, regardless of
+processing order — the age cap was firing on almost everything, for a
+reason that had nothing to do with the cap actually doing its job. The
+seeded data only intends *one* episode to ever trip that check
+(`episode_older_than_window`, where `received_at` is deliberately pushed
+far past `failed_at`) — for every other episode, `received_at` is minutes
+after `failed_at`, modelling a system that gates an episode shortly after
+it arrives. So that's what "now" should default to per episode:
+`episode.received_at`, not one global instant. An explicit `now` still
+overrides this globally, which is what every unit test in
+`tests/test_gate.py` uses to get a fixed, freezegun-friendly clock — only
+the CLI's real-batch default changed. Re-ran after the fix:
+`{'auto': 1, 'human_keystroke': 2, 'hard_refuse': 44}` — all three tiers
+present, as they should be.
+
+**Second wrong assumption, smaller, caught before it shipped rather than
+after.** The phase brief says to key cluster detection on `(error_code,
+issuer_family)`. Checked the actual seeded 40-episode outage cluster in
+`data/train.jsonl` before wiring that up, and neither half of that key
+works: `error_code` is the literal string `"BAD_REQUEST_ERROR"` on *every*
+one of the 600 episodes in this dataset (Razorpay's gateway collapses
+everything to one HTTP-level code), so it carries zero signal; and
+`issuer_family` is deliberately *randomised* per member of the seeded
+cluster in `data/generator.py` (Phase 5) — modelling one upstream gateway
+fault surfacing at several different banks in the same half hour, which
+reads as more realistic than one bank alone. Keying on `(error_code,
+issuer_family)` as written would fragment the one real 40-episode cluster
+into six sub-groups of 4-9 across issuer families, none over
+`outage_cluster_threshold` (15) — the seeded scenario would never
+collapse to a single refusal, silently. Switched the key to
+`error_reason` alone, which actually is constant across the seeded
+cluster (`"gateway_technical_error"`, checked empirically against the
+full 600-episode set — 76 total episodes share it, only 40 of which are
+the seeded cluster, and the other 36 are spread across the full 30-day
+window, not concentrated enough to false-trigger the same 30-minute-window
+threshold). Documented the reasoning in `src/gate/engine.py`'s module
+docstring rather than just silently deviating from the brief's literal
+wording.
+
+Verified end to end: `python -m src.runner --gate-only` over the real 600
+episodes → `episode_count=600 == actioned(0) + suppressed(45) +
+execution_failed(0) + pending(555)`; escalation tiers `auto=1,
+human_keystroke=2, hard_refuse=44`; exactly one `stage=stop` audit record,
+rationale naming `shared_cause_cluster` and the 40-episode count;
+`stopped_reason=cluster_escalation`. Separately, `touch KILL` before the
+same command → zero episodes processed, `stopped_reason=kill_switch`,
+confirming the kill switch is checked before the first episode, not after.
+`make verify-audit` equivalent → `chain intact — 48 records`. `ruff check`
+clean; all 70 tests pass (56 pre-existing plus 14 new across
+`test_gate.py` and `test_llm_boundary.py`). `make` itself still isn't on
+this Windows/git-bash shell (same as Phase 6) — ran the `python -m
+src.runner` command the Makefile's `gate-run` target wraps, directly.

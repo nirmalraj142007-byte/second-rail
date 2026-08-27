@@ -1,10 +1,14 @@
 # Where the LLM is not
 
-*First draft — Phase 4. Hardened in Phase 16 once the modules named below
-actually exist; as of this commit only `src/config_models.py` and
-`scripts/config_check.py` are real. Everywhere else I name a path, I'm
-naming where the boundary will be enforced once that phase lands, per the
-module map in `CLAUDE.md`.*
+*First draft — Phase 4. Updated Phase 7: `src/gate/` is now real, and
+`tests/test_llm_boundary.py` is the enforcement mechanism referenced
+throughout this document — it walks `src/gate/`, `src/execute/`,
+`src/attribute/`, `src/audit/`, `src/ingest/`, `src/db/` and fails the
+build if any file in them imports the LLM client module or contains the
+strings `"openai"`, `"genai"`, or `"anthropic"`. `src/execute/` and
+`src/attribute/` don't exist yet — everywhere else I name a path that
+isn't built, I'm naming where the boundary will be enforced once that
+phase lands, per the module map in `CLAUDE.md`.*
 
 Second Rail calls an LLM twice per episode, at most: once to classify a
 cause when the regex baseline doesn't match, once to pick one action from

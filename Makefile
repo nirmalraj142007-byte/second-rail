@@ -11,7 +11,7 @@ else
 	PIP := $(VENV_BIN)/pip
 endif
 
-.PHONY: setup doctor lint test clean data seal verify-seal eval demo approve verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve tunnel replay-webhooks
+.PHONY: setup doctor lint test clean data seal verify-seal eval demo approve verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve tunnel replay-webhooks gate-run
 
 setup:
 	$(PYTHON311) -m venv .venv
@@ -42,7 +42,14 @@ verify-seal:
 	$(PY) -m scripts.seal verify
 
 eval:
-	@echo "not yet built — phase 7 (make eval)"
+	@echo "not yet built — a later phase (make eval)"
+
+# Sources default to data/train.jsonl + holdout/sealed.jsonl (600 episodes
+# combined) inside src/runner.py — see that file's module docstring for why
+# train.jsonl alone (400 episodes) can't satisfy this phase's own "process
+# all 600" acceptance test. Zero LLM calls, zero network calls.
+gate-run:
+	$(PY) -m src.runner --gate-only
 
 demo:
 	@echo "not yet built — phase 8/9 (make demo)"
