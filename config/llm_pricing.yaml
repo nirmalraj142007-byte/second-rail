@@ -1,0 +1,29 @@
+# Second Rail — LLM per-token pricing, in paise per 1,000 tokens.
+#
+# Fetched: 2026-08-28. Sources are each vendor's own pricing page, not an
+# aggregator, read directly on the fetch date above:
+#   gemini-2.5-flash — https://ai.google.dev/gemini-api/docs/pricing
+#     standard tier, prompts <=200k tokens (this project's prompts are far
+#     under that): $0.30 / 1M input tokens, $2.50 / 1M output tokens.
+#   gpt-4o-mini      — https://developers.openai.com/api/docs/pricing
+#     standard tier: $0.15 / 1M input tokens, $0.60 / 1M output tokens.
+#
+# usd_to_inr is the one genuinely illustrative number in this file — a
+# rounded conversion constant, not a live rate. Sourced from the 7-day
+# average quoted by https://www.x-rates.com/average/?from=USD&to=INR on
+# 2026-08-26 (95.2), rounded to 95 for a stable constant that doesn't need
+# updating every time INR moves half a rupee. The two USD figures above are
+# copied verbatim off each vendor's page, not estimated — prices change, so
+# re-fetch and update the fetch date rather than editing paise values by hand.
+#
+# cost_paise = (input_tokens/1000)*input_paise_per_1k
+#            + (output_tokens/1000)*output_paise_per_1k
+usd_to_inr: 95.0
+
+models:
+  gemini-2.5-flash:
+    input_paise_per_1k: 2.85     # $0.30/1M * 95 / 1000
+    output_paise_per_1k: 23.75   # $2.50/1M * 95 / 1000
+  gpt-4o-mini:
+    input_paise_per_1k: 1.425    # $0.15/1M * 95 / 1000
+    output_paise_per_1k: 5.7     # $0.60/1M * 95 / 1000

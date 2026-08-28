@@ -1,7 +1,7 @@
 """Closed error taxonomy for Second Rail.
 
 Every error raised anywhere in this codebase is one of the subclasses below.
-Three are expected control flow and must never crash a run — each is caught
+Five are expected control flow and must never crash a run — each is caught
 at its own stage boundary and written to the audit log as a normal episode
 outcome, not a failure:
 
@@ -9,6 +9,18 @@ outcome, not a failure:
     GateRefusalError        an ineligible episode, suppressed and audited
     IdempotencyCollision    the idempotency key already exists — this is the
                              success path that proves duplicate-link avoidance
+    LLMCallError            the configured LLM provider call failed (timeout,
+                             429, quota) — src/diagnose/classifier.py catches
+                             this and degrades to the baseline's guess
+    LLMResponseInvalid      the LLM's response failed schema validation even
+                             after one repair retry — same degradation path
+
+Two of the above are conditional: LLMCallError and LLMResponseInvalid are
+only expected control flow once an LLM is actually configured and reachable.
+NullClient (no provider configured) raises ConfigError instead, deliberately
+NOT caught by the degradation path — "no LLM configured" is a setup mistake
+the run should fail loudly on, not something to quietly paper over with a
+guessed class_id.
 
 Three abort the run outright and must propagate to the top level:
 
@@ -124,6 +136,26 @@ class IdempotencyCollision(SecondRailError):
 
     code = "IDEMPOTENCY_COLLISION"
     stage = "execute"
+
+
+class LLMCallError(SecondRailError):
+    """The configured LLM provider call failed: timeout, 429, quota
+    exhaustion, or a malformed response envelope. Expected control flow once
+    a provider is configured — src/diagnose/classifier.py catches this and
+    degrades to the regex baseline's best guess, never crashes a run."""
+
+    code = "LLM_CALL_FAILED"
+    stage = "diagnose"
+
+
+class LLMResponseInvalid(SecondRailError):
+    """The LLM returned a response that failed schema validation (bad JSON,
+    missing field, or a class_id outside the taxonomy) even after one
+    repair-instruction retry. Expected control flow — same degradation path
+    as LLMCallError."""
+
+    code = "LLM_RESPONSE_INVALID"
+    stage = "diagnose"
 
 
 class AttributionError(SecondRailError):

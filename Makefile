@@ -12,7 +12,7 @@ else
 	PIP := $(VENV_BIN)/pip
 endif
 
-.PHONY: setup doctor lint test clean data seal verify-seal eval demo approve verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve tunnel replay-webhooks gate-run failure-demo failure-demo-backup guardrail-proof
+.PHONY: setup doctor lint test clean data seal verify-seal eval demo approve verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve tunnel replay-webhooks gate-run failure-demo failure-demo-backup guardrail-proof classify
 
 setup:
 	$(PYTHON311) -m venv .venv
@@ -98,6 +98,13 @@ db-check:
 
 config-check:
 	$(PY) -m scripts.config_check
+
+# SPLIT=train|sealed (required). Regex-vs-LLM head-to-head, coverage, cost,
+# self-graded + externally-anchored classification metrics. Writes
+# evidence/classification_metrics.json. Cached LLM responses make a second
+# run of the same split free of both LLM calls and network access.
+classify:
+	$(PY) -m scripts.classify --split $(SPLIT)
 
 # Primary failure demo (video beat 2:20-2:42) — real Razorpay test-mode
 # calls, a 12-episode slice, 429 injected at episode 7. Needs
