@@ -732,3 +732,67 @@ pending(553)`; `--execute --limit 3` against the real API produced the
 429/backoff/exception-list behavior described above, confirmed via a raw
 single-call probe that the cause is the account's exhausted 30-link cap,
 not a bug in this code.
+
+## D5 — 28 Aug 2026
+
+Phase 9: the fault-injection rig and both failure demonstrations.
+`src/execute/faults.py` (`FaultPlan` + `FaultInjectingExecutor`),
+`scripts/failure_demo.py`, `scripts/failure_demo_backup.py`,
+`scripts/guardrail_proof.py`, `tests/test_failure_paths.py`, plus a
+`list_payment_links()` addition to `src/razorpay_client.py` and two small
+changes to `src/runner.py`: `select_gate_eligible_slice()` (shared by both
+demo scripts to deterministically pick N gate-eligible episodes without
+touching the database) and a fix to the executor-failure path, which
+previously wrote the retry-attempt records to the audit chain but never a
+final record naming the outcome — `reason_code` renamed from the generic
+`"executor_error"` to `"executor_retry_exhausted"`, and a
+`stage="execute" outcome="execution_failed"` audit record added so the
+chain actually resolves instead of trailing off after the last attempt.
+
+**Where the first hypothesis was wrong.** Modelled the "timeout" fault as
+a `(0, {...})` response from the scripted HTTP client, on the assumption
+that a transport-level failure should look like the `(0, {...})` shape
+`RazorpayClient.create_payment_link_once` itself returns on an
+`httpx.TransportError`. Wrote the test, ran it, and the "timeout" episode
+came back `actioned` instead of `execution_failed` — the fault silently
+did nothing. The bug wasn't in the fault rig's index logic (a separate,
+narrower reproduction confirmed the rig fires on the right index every
+time); it was in `with_backoff()`, which only checks `if status_code <
+300: return ...` before ever consulting its `retryable()` predicate — and
+`0 < 300` is true, so status `0` reads as a *success*, not a failure, on
+its very first line. Switched to HTTP 408 (Request Timeout), a real,
+standard, non-retryable status that isn't in `with_backoff()`'s retryable
+set (429, 5xx), and the fault fires correctly. Left a comment on the fix
+explaining why `0` specifically cannot be used to script a failure through
+this path, since the mistake is easy to make again.
+
+**Consequence, stated plainly rather than worked around.** `make
+failure-demo` and a live `make guardrail-proof` both need real Razorpay
+calls, and this account's test-mode Payment Link cap is still the same
+exhausted one from Phase 8 (`LIMITATIONS.md`) — no reset window has
+arrived. Running either script live right now would 429/400 on every
+episode, not just the injected one, producing a recording that documents
+the account cap instead of the fault rig. Did not run them live and am
+not pasting fabricated output. Everything that does not require the live
+cap is genuinely exercised: `tests/test_failure_paths.py` (8 tests,
+mocked client, real retry/backoff/stopping-rule logic underneath),
+`scripts/failure_demo_backup.py` (no network, real `IngestService` dedup),
+and `scripts/guardrail_proof.py --dry-run-first` (real `FixtureExecutor`
+run, real fault-rig wiring, only the final Razorpay-API cross-check
+skipped) — all three ran for real, not simulated in the write-up.
+
+Verified: `pytest -q -m "not live"` → 98 passed (85 pre-existing plus 13
+new/changed across `test_failure_paths.py` and `test_executor.py`'s
+untouched suite); `python -m scripts.failure_demo_backup` → one episode,
+one `outcome=suppressed` audit record, exactly as the fixture-replay
+narrative claims; `python -m scripts.guardrail_proof --n 20
+--dry-run-first` → `duplicate links created: 0`, `cap breaches: 0`,
+`quiet-hour contacts: 0`, `idempotency collisions correctly detected:
+17/20` (the other 3 are the deliberately-faulted episodes that never
+touch `FixtureExecutor`'s own bookkeeping, so a second submission of them
+isn't a same-key collision — explained in the script's own inline
+comment, not glossed over), written to `evidence/guardrail_proof.json`;
+`make verify-audit` equivalent → `chain intact — 200 records`. `ruff
+check` clean on every new/changed file. `make` itself still isn't on this
+Windows/git-bash shell (same as Phases 6-8) — ran each target's underlying
+`python -m ...` command directly.

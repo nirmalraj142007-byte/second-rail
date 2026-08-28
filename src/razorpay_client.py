@@ -180,3 +180,12 @@ class RazorpayClient:
 
     def fetch_payment_link(self, plink_id: str) -> dict[str, Any]:
         return self._request("GET", f"/payment_links/{plink_id}")
+
+    def list_payment_links(self, count: int = 100, skip: int = 0) -> list[dict[str, Any]]:
+        """One page of the account's Payment Links, newest first. Razorpay's
+        list endpoint has no server-side filter on `notes`, so callers that
+        need "every link this run created" (guardrail_proof.py) must page
+        through this and filter client-side on notes.run_id themselves."""
+        result = self._request("GET", f"/payment_links?count={count}&skip={skip}")
+        items = result.get("items", [])
+        return list(items)

@@ -1,0 +1,19 @@
+{
+  "cancelled_count": 0,
+  "cap_breaches": 0,
+  "duplicate_links_created": 0,
+  "fault_plan": {
+    "inject_429_at_episode_index": 4,
+    "inject_429_repeat": 3,
+    "inject_5xx_at_index": 12,
+    "inject_duplicate_reference_at_index": 16,
+    "inject_timeout_at_index": 8
+  },
+  "idempotency_detected": 17,
+  "idempotency_total": 20,
+  "mode": "dry_run_first",
+  "n": 20,
+  "quiet_hour_contacts": 0,
+  "run_id": "01M13TZPD7HV2CE8T63TSNS292",
+  "verification_note": "not verified against the real API (--dry-run-first)"
+}

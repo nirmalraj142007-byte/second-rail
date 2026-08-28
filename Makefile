@@ -1,5 +1,6 @@
 SHELL := /bin/bash
 PYTHON311 := python3.11
+N ?= 200
 
 ifeq ($(OS),Windows_NT)
 	VENV_BIN := .venv/Scripts
@@ -11,7 +12,7 @@ else
 	PIP := $(VENV_BIN)/pip
 endif
 
-.PHONY: setup doctor lint test clean data seal verify-seal eval demo approve verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve tunnel replay-webhooks gate-run
+.PHONY: setup doctor lint test clean data seal verify-seal eval demo approve verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve tunnel replay-webhooks gate-run failure-demo failure-demo-backup guardrail-proof
 
 setup:
 	$(PYTHON311) -m venv .venv
@@ -97,3 +98,24 @@ db-check:
 
 config-check:
 	$(PY) -m scripts.config_check
+
+# Primary failure demo (video beat 2:20-2:42) — real Razorpay test-mode
+# calls, a 12-episode slice, 429 injected at episode 7. Needs
+# RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET in .env.
+failure-demo:
+	$(PY) -m scripts.failure_demo
+
+# Backup failure demo — no network, no keys. Duplicate payment.failed
+# webhook replay, dedup no-op.
+failure-demo-backup:
+	$(PY) -m scripts.failure_demo_backup
+
+# N real Payment Link creations under fault injection — the headline
+# non-circular metric. `DRY_RUN_FIRST=1` validates the plan end to end
+# with FixtureExecutor first, at zero API cost (equivalent to passing
+# --dry-run-first directly to the script — `make`'s own argument parser
+# cannot take a bare `--flag` after this target's name, so that flag must
+# go through this variable, or call `python -m scripts.guardrail_proof
+# --n N --dry-run-first` directly).
+guardrail-proof:
+	$(PY) -m scripts.guardrail_proof --n $(N) $(if $(DRY_RUN_FIRST),--dry-run-first)
