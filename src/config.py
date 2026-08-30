@@ -22,9 +22,15 @@ class Settings(BaseSettings):
     razorpay_key_id: str | None = None
     razorpay_key_secret: str | None = None
     razorpay_webhook_secret: str | None = None
-    llm_provider: Literal["gemini", "openai", "none"] = "none"
+    llm_provider: Literal["gemini", "openai", "groq", "none"] = "none"
     llm_api_key: str | None = None
-    llm_model: str = "gemini-2.5-flash"
+    # This default matters even with llm_provider="none": DiskCache lookups
+    # are keyed on (model, prompt) regardless of provider, so a clean judge
+    # machine with no .env at all still hits the committed cache — as long
+    # as this string matches whatever model actually populated it. See
+    # BUILD_LOG.md for why that's openai/gpt-oss-20b (via Groq), not the
+    # Gemini model CLAUDE.md and the proposal originally named.
+    llm_model: str = "openai/gpt-oss-20b"
     db_path: Path = Path("second_rail.db")
     audit_dir: Path = Path("evidence/audit")
     cache_dir: Path = Path("cache")

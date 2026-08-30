@@ -20,6 +20,7 @@ spending the batch's time budget on when a cheap, correct fallback exists).
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass
 from hashlib import sha256
@@ -37,6 +38,48 @@ REQUEST_TIMEOUT_SECONDS = 20.0
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+# Groq's endpoint is OpenAI-compatible (same request/response shape) —
+# https://console.groq.com/docs/api-reference, confirmed live 2026-08-30.
+GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+# blueprint §6 (LLM provider row) said "throttle to 1 req/s" — written
+# before the actual limit was checked. Live testing on 2026-08-30 (see
+# BUILD_LOG.md) found the documented "10 requests/minute" free-tier figure
+# didn't hold either: pacing calls at exactly 10/min still produced
+# sustained HTTP 429s through most of a real batch. Backed off further to
+# 5/min. One bucket per client instance — a Diagnoser owns exactly one
+# client for the run, so this is the whole run's rate.
+_SELF_IMPOSED_RATE_PER_SECOND = 5.0 / 60.0
+
+# Groq's own published free-tier limit for openai/gpt-oss-20b/120b
+# (https://console.groq.com/docs/rate-limits, confirmed live 2026-08-30) is
+# 30 requests/min but only 8,000 tokens/min — the tighter constraint. A real
+# call against this project's actual rendered prompt measured 1,152 input +
+# 115 output = 1,267 tokens (reasoning_effort="low" keeps the output side
+# small, unlike Gemini's mandatory thinking tokens). 5/min * 1,267 ~ 6,335,
+# a ~20% margin under the 8,000 TPM ceiling.
+_GROQ_RATE_PER_SECOND = 5.0 / 60.0
+
+
+class _TokenBucket:
+    """Blocks the caller so wrapped calls never exceed `rate` per second.
+    A second, smaller copy of src/razorpay_client.py's own — not imported
+    from there, since that module's is a private (leading-underscore) name
+    and the two rates are independently tuned per provider."""
+
+    def __init__(self, rate: float) -> None:
+        self._interval = 1.0 / rate
+        self._lock = threading.Lock()
+        self._next_allowed = 0.0
+
+    def acquire(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            wait = self._next_allowed - now
+            if wait > 0:
+                time.sleep(wait)
+                now = time.monotonic()
+            self._next_allowed = max(now, self._next_allowed) + self._interval
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +127,23 @@ def hash_prompt(model: str, prompt: str) -> str:
     return sha256(f"{model}:{prompt}".encode()).hexdigest()
 
 
+def _to_gemini_schema(schema: dict) -> dict:
+    """Gemini's `responseSchema` is a restricted subset of OpenAPI 3.0's
+    Schema object — confirmed live: `additionalProperties` is rejected with
+    HTTP 400 ("Unknown name additionalProperties ... Cannot find field"),
+    even though it's valid standard JSON Schema and OpenAI's strict
+    json_schema mode requires it. classify_json_schema() is written once,
+    for OpenAI's stricter shape; this strips the field Gemini doesn't
+    recognise, recursively, rather than maintaining two schema builders."""
+    if not isinstance(schema, dict):
+        return schema
+    return {
+        key: _to_gemini_schema(value) if isinstance(value, dict) else value
+        for key, value in schema.items()
+        if key != "additionalProperties"
+    }
+
+
 # ---------------------------------------------------------------------------
 # response + protocol
 # ---------------------------------------------------------------------------
@@ -126,7 +186,7 @@ class NullClient:
             "no LLM configured",
             code="NO_LLM_CONFIGURED",
             remediation=(
-                "set LLM_PROVIDER=gemini or LLM_PROVIDER=openai and LLM_API_KEY in .env, "
+                "set LLM_PROVIDER=gemini, openai, or groq and LLM_API_KEY in .env, "
                 "or ensure every episode is resolved by the regex baseline"
             ),
         )
@@ -146,6 +206,7 @@ class GeminiClient:
         self._model = model
         self._pricing = pricing or load_pricing()
         self._client = httpx.Client(timeout=timeout, transport=transport)
+        self._bucket = _TokenBucket(rate=_SELF_IMPOSED_RATE_PER_SECOND)
 
     def close(self) -> None:
         self._client.close()
@@ -153,6 +214,7 @@ class GeminiClient:
     def complete(
         self, prompt: str, *, max_tokens: int, temperature: float, json_schema: dict
     ) -> LLMResponse:
+        self._bucket.acquire()
         url = f"{GEMINI_BASE_URL}/{self._model}:generateContent"
         body = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
@@ -160,7 +222,7 @@ class GeminiClient:
                 "maxOutputTokens": max_tokens,
                 "temperature": temperature,
                 "responseMimeType": "application/json",
-                "responseSchema": json_schema,
+                "responseSchema": _to_gemini_schema(json_schema),
             },
         }
         start = time.monotonic()
@@ -191,7 +253,15 @@ class GeminiClient:
             text = payload["candidates"][0]["content"]["parts"][0]["text"]
             usage = payload.get("usageMetadata", {})
             input_tokens = int(usage.get("promptTokenCount", 0))
-            output_tokens = int(usage.get("candidatesTokenCount", 0))
+            # thoughtsTokenCount is real, billed output — Gemini 3's default
+            # "minimal" thinking level is not fully disableable for Flash
+            # models (confirmed live, see BUILD_LOG.md) and routinely
+            # outweighs the visible answer. Omitting it here would silently
+            # under-report cost, which config/llm_pricing.yaml's own module
+            # docstring calls "a laundered number."
+            output_tokens = int(usage.get("candidatesTokenCount", 0)) + int(
+                usage.get("thoughtsTokenCount", 0)
+            )
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise LLMCallError(
                 f"Gemini response missing expected fields: {exc}", code="LLM_MALFORMED_ENVELOPE"
@@ -230,6 +300,7 @@ class OpenAIClient:
         self._model = model
         self._pricing = pricing or load_pricing()
         self._client = httpx.Client(timeout=timeout, transport=transport)
+        self._bucket = _TokenBucket(rate=_SELF_IMPOSED_RATE_PER_SECOND)
 
     def close(self) -> None:
         self._client.close()
@@ -237,6 +308,7 @@ class OpenAIClient:
     def complete(
         self, prompt: str, *, max_tokens: int, temperature: float, json_schema: dict
     ) -> LLMResponse:
+        self._bucket.acquire()
         body = {
             "model": self._model,
             "messages": [{"role": "user", "content": prompt}],
@@ -305,6 +377,108 @@ class OpenAIClient:
         self.close()
 
 
+class GroqClient:
+    """Groq's inference API for open-weight models (e.g. openai/gpt-oss-20b)
+    — OpenAI-compatible request/response shape, so this mirrors OpenAIClient
+    almost exactly. Two real differences, both confirmed live rather than
+    assumed from the shared shape: the token-budget field is named
+    `max_completion_tokens`, not `max_tokens` (the latter is accepted but
+    deprecated on Groq); and `reasoning_effort` is a genuine, documented
+    dial for gpt-oss models (low/medium/high) — set to "low" here, since a
+    one-class-label classification task has no use for extended reasoning
+    and every reasoning token is billed the same as a visible answer token
+    (see Gemini's thinking-token discovery in this same module's history,
+    BUILD_LOG.md)."""
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        *,
+        pricing: PricingTable | None = None,
+        timeout: float = REQUEST_TIMEOUT_SECONDS,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self._api_key = api_key
+        self._model = model
+        self._pricing = pricing or load_pricing()
+        self._client = httpx.Client(timeout=timeout, transport=transport)
+        self._bucket = _TokenBucket(rate=_GROQ_RATE_PER_SECOND)
+
+    def close(self) -> None:
+        self._client.close()
+
+    def complete(
+        self, prompt: str, *, max_tokens: int, temperature: float, json_schema: dict
+    ) -> LLMResponse:
+        self._bucket.acquire()
+        body = {
+            "model": self._model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_completion_tokens": max_tokens,
+            "temperature": temperature,
+            "reasoning_effort": "low",
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "cause_classification",
+                    "strict": True,
+                    "schema": json_schema,
+                },
+            },
+        }
+        headers = {"Authorization": f"Bearer {self._api_key}"}
+        start = time.monotonic()
+        try:
+            response = self._client.post(GROQ_CHAT_COMPLETIONS_URL, headers=headers, json=body)
+        except httpx.TimeoutException as exc:
+            raise LLMCallError(
+                f"Groq request timed out after {self._client.timeout}s", code="LLM_TIMEOUT"
+            ) from exc
+        except httpx.TransportError as exc:
+            raise LLMCallError(f"Groq request failed: {exc}", code="LLM_TRANSPORT_ERROR") from exc
+        latency_ms = int((time.monotonic() - start) * 1000)
+
+        if response.status_code == 429:
+            raise LLMCallError("Groq rate limit (HTTP 429)", code="LLM_RATE_LIMITED")
+        if response.status_code == 403:
+            raise LLMCallError("Groq quota/permission error (HTTP 403)", code="LLM_QUOTA_EXCEEDED")
+        if response.status_code >= 400:
+            raise LLMCallError(
+                f"Groq returned HTTP {response.status_code}: {response.text[:300]}",
+                code=f"LLM_HTTP_{response.status_code}",
+            )
+
+        try:
+            payload = response.json()
+            text = payload["choices"][0]["message"]["content"]
+            usage = payload.get("usage", {})
+            input_tokens = int(usage.get("prompt_tokens", 0))
+            output_tokens = int(usage.get("completion_tokens", 0))
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise LLMCallError(
+                f"Groq response missing expected fields: {exc}", code="LLM_MALFORMED_ENVELOPE"
+            ) from exc
+
+        cost_paise = compute_cost_paise(self._pricing, self._model, input_tokens, output_tokens)
+        return LLMResponse(
+            text=text,
+            model=self._model,
+            prompt_hash=hash_prompt(self._model, prompt),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_paise=cost_paise,
+            latency_ms=latency_ms,
+            cache_hit=False,
+        )
+
+    def __enter__(self) -> GroqClient:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+
 def build_llm_client(settings: Any) -> LLMClient:
     """Selected by settings.llm_provider — the one place a caller turns
     config into a concrete client. `Any` rather than importing src.config
@@ -326,4 +500,12 @@ def build_llm_client(settings: Any) -> LLMClient:
                 remediation="set LLM_API_KEY in .env",
             )
         return OpenAIClient(settings.llm_api_key, settings.llm_model)
+    if settings.llm_provider == "groq":
+        if not settings.llm_api_key:
+            raise ConfigError(
+                "LLM_PROVIDER=groq but LLM_API_KEY is not set",
+                code="MISSING_LLM_API_KEY",
+                remediation="set LLM_API_KEY in .env",
+            )
+        return GroqClient(settings.llm_api_key, settings.llm_model)
     return NullClient()

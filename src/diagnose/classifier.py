@@ -56,7 +56,18 @@ from src.logging_setup import get_logger
 PROMPT_VERSION = "classify_v1"
 PROMPT_PATH = Path(__file__).parent / "prompts" / f"{PROMPT_VERSION}.txt"
 
-MAX_OUTPUT_TOKENS = 300
+# The phase spec for this module called for a 300-token hard cap. Live
+# testing against gemini-3.6-flash (see BUILD_LOG.md) found that number
+# unusable on the actual configured model: Gemini 3's default "minimal"
+# thinking level still spends 260-380 tokens of internal reasoning against
+# this same maxOutputTokens budget on this project's real prompts, on a
+# provider that (per its own docs) cannot fully disable thinking for Flash
+# models — so 300 truncates the JSON answer before it's ever emitted,
+# leaving prose like "Here is the JSON" as the entire visible response.
+# 1200 was chosen by measuring real thoughtsTokenCount + candidatesTokenCount
+# on this project's actual rendered prompt (~640 combined) and adding
+# headroom for the repair-retry prompt, which is longer.
+MAX_OUTPUT_TOKENS = 1200
 LLM_TEMPERATURE = 0.0
 CHARS_PER_TOKEN = 4  # rough heuristic; no tokenizer dependency in requirements.txt
 INPUT_TOKEN_BUDGET = 1500

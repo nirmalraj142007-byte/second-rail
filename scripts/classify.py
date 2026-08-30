@@ -360,8 +360,22 @@ def _section_independent(
 
 
 def _section_head_to_head(
-    baseline: RegexBaseline, diagnoser: Diagnoser, episodes: list[tuple[Episode, str]]
+    baseline: RegexBaseline,
+    diagnoser: Diagnoser,
+    episodes: list[tuple[Episode, str]],
+    *,
+    llm_max_per_family: int | None = None,
 ) -> dict[str, Any]:
+    """llm_max_per_family caps how many members of each family are sent to
+    the LLM (regex still runs over every member) — a disclosed, reported
+    sample size, not a silent shortcut. None (the default, and what
+    `make classify` always uses) means no cap: every episode in every
+    family goes to the LLM. Exists because Gemini's free tier caps at 10
+    requests/minute (confirmed live, see BUILD_LOG.md); a full 400-episode
+    train-split run at that rate takes about 40 minutes, which is why this
+    project's own committed evidence run used a capped sample here while
+    still running the full, uncapped set on the smaller, higher-value
+    harvested-strings and doc-anchored sections."""
     by_family: dict[str, list[tuple[Episode, str]]] = defaultdict(list)
     for ep, true in episodes:
         family = ep.error_reason or "(none)"
@@ -374,10 +388,11 @@ def _section_head_to_head(
     def _family_row(name: str, members: list[tuple[Episode, str]]) -> dict[str, Any]:
         regex_pairs = [(_run_regex(baseline, ep), true) for ep, true in members]
         regex_acc = _accuracy(regex_pairs)
+        llm_members = members if llm_max_per_family is None else members[:llm_max_per_family]
         llm_pairs: list[tuple[str, str]] = []
         skipped = False
         skip_reason = ""
-        for ep, true in members:
+        for ep, true in llm_members:
             try:
                 diagnosis = _run_llm_only(diagnoser, ep)
             except LLMUnavailable as exc:
@@ -397,6 +412,7 @@ def _section_head_to_head(
         return {
             "family": name,
             "volume": len(members),
+            "llm_sample_size": None if skipped else len(llm_members),
             "regex_accuracy": round(regex_acc, 4),
             "llm_accuracy": None if skipped else round(llm_acc, 4),
             "llm_skipped_reason": skip_reason if skipped else None,
@@ -492,14 +508,17 @@ def _print_report(
             print(f"    llm skipped: {section['llm_skipped_reason']}")
 
     print("\n--- 4. THE HEAD-TO-HEAD: top error families by volume, regex vs LLM ---")
+
     def _format_row(row: dict[str, Any]) -> str:
         llm_str = "n/a" if row["llm_accuracy"] is None else f"{row['llm_accuracy'] * 100:.1f}%"
+        if row["llm_sample_size"] is not None and row["llm_sample_size"] < row["volume"]:
+            llm_str += f" (n={row['llm_sample_size']})"
         regex_str = f"{row['regex_accuracy'] * 100:.1f}%"
         return (
-            f"{row['family']:<32}{row['volume']:>8}{regex_str:>10}{llm_str:>10}  {row['winner']}"
+            f"{row['family']:<32}{row['volume']:>8}{regex_str:>10}{llm_str:>14}  {row['winner']}"
         )
 
-    print(f"{'family':<32}{'volume':>8}{'regex':>10}{'llm':>10}  winner")
+    print(f"{'family':<32}{'volume':>8}{'regex':>10}{'llm':>14}  winner")
     for row in head_to_head["top_families"]:
         print(_format_row(row))
     if head_to_head["tail"]:
@@ -515,6 +534,16 @@ def _print_report(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Second Rail diagnosis-layer evidence pass")
     parser.add_argument("--split", required=True, choices=["train", "sealed"])
+    parser.add_argument(
+        "--llm-max-per-family",
+        type=int,
+        default=None,
+        help=(
+            "Cap on episodes per family sent to the LLM in the head-to-head "
+            "(regex still runs on every member). Default: no cap. Exists "
+            "for free-tier RPM budgeting — see _section_head_to_head's docstring."
+        ),
+    )
     args = parser.parse_args()
 
     settings = load_settings()
@@ -542,7 +571,9 @@ def main() -> int:
         ),
     ]
 
-    head_to_head = _section_head_to_head(baseline, diagnoser, episodes)
+    head_to_head = _section_head_to_head(
+        baseline, diagnoser, episodes, llm_max_per_family=args.llm_max_per_family
+    )
 
     _print_report(args.split, production, externally_anchored, head_to_head)
 

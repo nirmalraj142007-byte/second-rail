@@ -796,3 +796,99 @@ comment, not glossed over), written to `evidence/guardrail_proof.json`;
 check` clean on every new/changed file. `make` itself still isn't on this
 Windows/git-bash shell (same as Phases 6-8) — ran each target's underlying
 `python -m ...` command directly.
+
+## D6 — 30 Aug 2026
+
+Phase 10: the diagnosis layer. `src/diagnose/{baseline,cache,llm_client,
+classifier}.py`, `src/diagnose/prompts/classify_v1.txt`,
+`scripts/classify.py` (`make classify SPLIT=train|sealed`),
+`tests/test_diagnose.py`, `config/llm_pricing.yaml`, two new expected-
+control-flow error types (`LLMCallError`, `LLMResponseInvalid`) in
+`src/errors.py`.
+
+`RegexBaseline` runs first and free on every episode; the LLM only ever
+sees what it can't resolve, cache-first, one repair retry on invalid JSON,
+immediate degradation to an `unknown` sentinel on a network failure or an
+invented `class_id` — never a crash. `NullClient` (no provider configured)
+is the one exception: it fails loudly instead of degrading, since "no LLM
+configured" is a setup mistake, not a transient one.
+
+**Where the first hypothesis was wrong — three times over, on the same
+afternoon.** The phase's own instructions named `gemini-2.5-flash` and a
+300-token hard cap. Neither survived contact with the real API:
+
+1. A live call against `gemini-2.5-flash` returned HTTP 404, "no longer
+   available to new users" — Google's pricing page still lists it as
+   active, but this project's key can't reach it. Switched to
+   `gemini-3.6-flash`.
+2. `gemini-3.6-flash` then returned syntactically-broken JSON ("Here is
+   the JSON") at `max_tokens=300`. Assumed the model just wasn't following
+   instructions; the real cause, found by re-running with a 2000-token
+   budget and reading `usageMetadata`, was `thoughtsTokenCount: 259-378`
+   — Gemini 3 Flash's default "minimal" thinking level is billed against
+   the same output-token budget as the visible answer and, per Google's
+   own docs, cannot be fully disabled on Flash models. Raised the cap to
+   1200 and started counting `thoughtsTokenCount` into cost — omitting it
+   would have under-reported real spend.
+3. Even after that fix, a real batch against Gemini's documented "10
+   requests/minute" free-tier figure produced sustained HTTP 429s through
+   most of the run. The number in Google's own docs didn't hold for this
+   key in practice. Backing off further (5/min) didn't fix it either, and
+   at that pace the phase's evidence pass (~440 calls) would have taken
+   over an hour of wall-clock time against a provider that kept 429-ing
+   anyway.
+
+Rather than keep guessing at a working Gemini pace, added a third,
+OpenAI-compatible provider: `GroqClient`, running `openai/gpt-oss-20b`.
+Groq's own docs name a real constraint too — 8,000 tokens/min, tighter than
+its 30 requests/min — but paced at 5 calls/min against a measured
+~1,267 tokens/call (comfortable margin under the ceiling), the full
+evidence pass ran clean: zero 429s, zero degraded episodes, in about 15
+minutes. `reasoning_effort="low"` on the gpt-oss models also sidesteps the
+thinking-token problem entirely — 115 output tokens on the real prompt,
+against Gemini 3.6's 300-500. Extended `Settings.llm_provider` to
+`gemini | openai | groq | none`, added `GroqClient` alongside `GeminiClient`
+and `OpenAIClient` behind the same `LLMClient` protocol, and updated
+`Settings.llm_model`'s default to `openai/gpt-oss-20b` — that default is
+load-bearing even with `llm_provider=none`, since `DiskCache` looks up by
+`(model, prompt)` regardless of provider, so it's what lets a clean judge
+machine with no `.env` at all still hit the committed cache.
+
+**The real head-to-head**, from `evidence/classification_metrics.json`
+(`make classify SPLIT=train`, 400 train episodes, live Groq calls, cache
+committed):
+
+- **Production coverage:** regex resolves 400/400 (100%) — a property of
+  the generator (every train episode's `error_reason` is copied verbatim
+  from the same anchor token its class's regex pattern was written from,
+  per `taxonomy.yaml`'s own header comment), disclosed as such, not
+  evidence about real traffic. Cost: ₹0 per 100 episodes on this split.
+- **Harvested strings, raw real fields (n=20):** regex 5.0% (1/20) vs LLM
+  20.0% (4/20). The LLM genuinely wins here, but both numbers are bad —
+  19/20 of these real, forced test-mode failures collapse to a generic
+  "Payment failed" envelope with almost no signal for either method.
+- **Razorpay's own doc-published descriptions (n=17, independent label
+  source):** regex 82.3% (14/17) vs LLM 88.2% (15/17) — regex holds up
+  because several patterns were written with human-readable phrase
+  alternatives (`"declined by the bank"`, `"temporary issue at your
+  bank"`) specifically for this case, not just the raw token.
+- **Head-to-head, top 5 error families by volume on train (LLM sampled at
+  n=8/family for time budget, regex run on the full family):** tied
+  100%/100% on every family and the tail bucket. Expected, given the
+  first bullet — reported anyway, not hidden, because the instruction was
+  to report the head-to-head, not just the flattering half of it.
+
+No result here was cherry-picked to make regex the villain or the LLM the
+hero: regex loses badly on the one section that's hardest to game
+(genuinely raw production-shaped text), holds up respectably against
+Razorpay's own prose, and ties trivially on the synthetic split — three
+different, honestly-reported outcomes from three different evidence
+sources.
+
+Verified: `pytest -q -m "not live"` → 107 passed (98 pre-existing plus 9
+new in `test_diagnose.py`); `ruff check` clean on every new/changed file;
+`make classify SPLIT=train` run twice back to back — second run identical
+output, cache file count unchanged at 77 (all `openai/gpt-oss-20b`,
+verified by content, not filename), confirming zero live calls on the
+repeat. `cache/*.json` is what makes that possible for anyone cloning this
+repo with no key.

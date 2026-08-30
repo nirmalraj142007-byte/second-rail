@@ -2,69 +2,73 @@
   "externally_anchored": [
     {
       "label": "harvested strings (raw, real fields)",
-      "llm_accuracy": null,
-      "llm_skipped_reason": "[NO_LLM_CONFIGURED] no LLM configured \u2014 set LLM_PROVIDER=gemini or LLM_PROVIDER=openai and LLM_API_KEY in .env, or ensure every episode is resolved by the regex baseline",
+      "llm_accuracy": 0.2,
       "n_episodes": 20,
       "regex_accuracy": 0.05
     },
     {
       "label": "Razorpay doc snapshot (independent label source)",
-      "llm_accuracy": null,
-      "llm_skipped_reason": "[NO_LLM_CONFIGURED] no LLM configured \u2014 set LLM_PROVIDER=gemini or LLM_PROVIDER=openai and LLM_API_KEY in .env, or ensure every episode is resolved by the regex baseline",
+      "llm_accuracy": 0.8824,
       "n_episodes": 17,
       "regex_accuracy": 0.8235
     }
   ],
   "head_to_head": {
-    "summary": "LLM comparison not run for one or more top families (no LLM configured) \u2014 see llm_skipped_reason on each row; regex-only accuracy is reported above.",
+    "summary": "regex and the LLM tied across the top 5 error families by volume.",
     "tail": {
       "family": "(tail \u2014 remaining lower-volume families)",
-      "llm_accuracy": null,
-      "llm_skipped_reason": "[NO_LLM_CONFIGURED] no LLM configured \u2014 set LLM_PROVIDER=gemini or LLM_PROVIDER=openai and LLM_API_KEY in .env, or ensure every episode is resolved by the regex baseline",
+      "llm_accuracy": 1.0,
+      "llm_sample_size": 8,
+      "llm_skipped_reason": null,
       "regex_accuracy": 1.0,
       "volume": 87,
-      "winner": "n/a (LLM not run)"
+      "winner": "tie"
     },
     "top_families": [
       {
         "family": "insufficient_fund",
-        "llm_accuracy": null,
-        "llm_skipped_reason": "[NO_LLM_CONFIGURED] no LLM configured \u2014 set LLM_PROVIDER=gemini or LLM_PROVIDER=openai and LLM_API_KEY in .env, or ensure every episode is resolved by the regex baseline",
+        "llm_accuracy": 1.0,
+        "llm_sample_size": 8,
+        "llm_skipped_reason": null,
         "regex_accuracy": 1.0,
         "volume": 88,
-        "winner": "n/a (LLM not run)"
+        "winner": "tie"
       },
       {
         "family": "gateway_technical_error",
-        "llm_accuracy": null,
-        "llm_skipped_reason": "[NO_LLM_CONFIGURED] no LLM configured \u2014 set LLM_PROVIDER=gemini or LLM_PROVIDER=openai and LLM_API_KEY in .env, or ensure every episode is resolved by the regex baseline",
+        "llm_accuracy": 1.0,
+        "llm_sample_size": 8,
+        "llm_skipped_reason": null,
         "regex_accuracy": 1.0,
         "volume": 69,
-        "winner": "n/a (LLM not run)"
+        "winner": "tie"
       },
       {
         "family": "authentication_failed",
-        "llm_accuracy": null,
-        "llm_skipped_reason": "[NO_LLM_CONFIGURED] no LLM configured \u2014 set LLM_PROVIDER=gemini or LLM_PROVIDER=openai and LLM_API_KEY in .env, or ensure every episode is resolved by the regex baseline",
+        "llm_accuracy": 1.0,
+        "llm_sample_size": 8,
+        "llm_skipped_reason": null,
         "regex_accuracy": 1.0,
         "volume": 67,
-        "winner": "n/a (LLM not run)"
+        "winner": "tie"
       },
       {
         "family": "card_declined",
-        "llm_accuracy": null,
-        "llm_skipped_reason": "[NO_LLM_CONFIGURED] no LLM configured \u2014 set LLM_PROVIDER=gemini or LLM_PROVIDER=openai and LLM_API_KEY in .env, or ensure every episode is resolved by the regex baseline",
+        "llm_accuracy": 1.0,
+        "llm_sample_size": 8,
+        "llm_skipped_reason": null,
         "regex_accuracy": 1.0,
         "volume": 50,
-        "winner": "n/a (LLM not run)"
+        "winner": "tie"
       },
       {
         "family": "card_number_invalid",
-        "llm_accuracy": null,
-        "llm_skipped_reason": "[NO_LLM_CONFIGURED] no LLM configured \u2014 set LLM_PROVIDER=gemini or LLM_PROVIDER=openai and LLM_API_KEY in .env, or ensure every episode is resolved by the regex baseline",
+        "llm_accuracy": 1.0,
+        "llm_sample_size": 8,
+        "llm_skipped_reason": null,
         "regex_accuracy": 1.0,
         "volume": 39,
-        "winner": "n/a (LLM not run)"
+        "winner": "tie"
       }
     ]
   },
