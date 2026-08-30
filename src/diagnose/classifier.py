@@ -88,6 +88,8 @@ class Diagnosis:
     cache_hit: bool
     latency_ms: int
     cost_paise: int
+    input_tokens: int
+    output_tokens: int
     llm_degraded: bool
     features_used: list[str]
 
@@ -263,7 +265,15 @@ class Diagnoser:
 
     def _complete_with_repair(
         self, prompt: str, schema: dict
-    ) -> tuple[LLMClassification, LLMResponse] | None:
+    ) -> tuple[LLMClassification | None, LLMResponse]:
+        """Always returns the last LLMResponse actually received, so its
+        real cost_paise/input_tokens/output_tokens are never lost even when
+        classification ultimately fails — a repair retry still spends real
+        tokens, and a degraded Diagnosis that reports 0 cost for it would
+        under-report real spend. Returns (None, response) when validation
+        failed even after the repair retry. Raises LLMCallError (uncaught
+        here) if the network call itself failed — that path has no
+        response at all to attribute cost to; the caller handles it."""
         response = self._call_llm_cached(prompt, schema)
         parsed = _try_parse(response.text, self._class_ids)
         if parsed is not None:
@@ -277,7 +287,7 @@ class Diagnoser:
             return parsed, repair_response
 
         self._logger.warning("LLM response still invalid after one repair retry — degrading")
-        return None
+        return None, repair_response
 
     def diagnose(self, ep: Episode) -> Diagnosis:
         """Production entry point: free regex baseline first, LLM only for
@@ -300,6 +310,8 @@ class Diagnoser:
                 cache_hit=False,
                 latency_ms=0,
                 cost_paise=0,
+                input_tokens=0,
+                output_tokens=0,
                 llm_degraded=False,
                 features_used=[baseline_result.matched_field],
             )
@@ -318,14 +330,20 @@ class Diagnoser:
         schema = classify_json_schema(self._taxonomy)
 
         start = time.monotonic()
+        parsed: LLMClassification | None = None
+        llm_response: LLMResponse | None = None
         try:
-            result = self._complete_with_repair(prompt, schema)
+            parsed, llm_response = self._complete_with_repair(prompt, schema)
         except LLMCallError as exc:
             self._logger.warning("LLM call failed (%s) — degrading to %r", exc, UNKNOWN_CLASS_ID)
-            result = None
         elapsed_ms = int((time.monotonic() - start) * 1000)
 
-        if result is None:
+        if parsed is None:
+            # llm_response may still be set here (validation failed even
+            # after a repair retry) — real tokens were spent on those
+            # calls, and that cost must not disappear just because the
+            # classification itself did. Only a pure LLMCallError (no
+            # response ever received) leaves it None, i.e. genuinely free.
             return Diagnosis(
                 episode_id=ep.episode_id,
                 method="llm",
@@ -333,16 +351,22 @@ class Diagnoser:
                 confidence=0.0,
                 rationale="LLM classification unavailable or invalid; degraded to unknown.",
                 llm_model=self._model_name,
-                prompt_hash=self._cache.key(self._model_name, prompt),
+                prompt_hash=(
+                    llm_response.prompt_hash
+                    if llm_response
+                    else self._cache.key(self._model_name, prompt)
+                ),
                 prompt_version=PROMPT_VERSION,
-                cache_hit=False,
+                cache_hit=llm_response.cache_hit if llm_response else False,
                 latency_ms=elapsed_ms,
-                cost_paise=0,
+                cost_paise=llm_response.cost_paise if llm_response else 0,
+                input_tokens=llm_response.input_tokens if llm_response else 0,
+                output_tokens=llm_response.output_tokens if llm_response else 0,
                 llm_degraded=True,
                 features_used=[],
             )
 
-        parsed, llm_response = result
+        assert llm_response is not None  # parsed is only set alongside a response
         return Diagnosis(
             episode_id=ep.episode_id,
             method="llm",
@@ -355,6 +379,8 @@ class Diagnoser:
             cache_hit=llm_response.cache_hit,
             latency_ms=llm_response.latency_ms,
             cost_paise=llm_response.cost_paise,
+            input_tokens=llm_response.input_tokens,
+            output_tokens=llm_response.output_tokens,
             llm_degraded=False,
             features_used=parsed.features_used,
         )

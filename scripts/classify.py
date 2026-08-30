@@ -60,7 +60,7 @@ from src.config_models import Taxonomy, load_all
 from src.diagnose.baseline import RegexBaseline
 from src.diagnose.cache import DiskCache
 from src.diagnose.classifier import Diagnoser, Diagnosis
-from src.diagnose.llm_client import build_llm_client
+from src.diagnose.llm_client import PricingTable, build_llm_client, compute_cost_paise, load_pricing
 from src.errors import ConfigError
 from src.gate.checks import Episode
 
@@ -273,18 +273,38 @@ def _run_llm_only(diagnoser: Diagnoser, ep: Episode) -> Diagnosis:
         raise LLMUnavailable(str(exc)) from exc
 
 
+def _historical_cost_paise(pricing: PricingTable, diagnosis: Diagnosis) -> int:
+    """Diagnosis.cost_paise is deliberately 0 on a cache hit (see
+    classifier.py — "already paid for, costs this run nothing"), which is
+    correct for "did this run spend money" but would make a re-run of
+    `make classify` report zero real spend everywhere, obscuring that the
+    pricing config is genuinely wired up. This recomputes the true
+    historical cost from the token counts Diagnosis always carries,
+    regardless of cache_hit — what it actually cost the first time this
+    exact prompt was sent."""
+    if diagnosis.llm_model is None:
+        return 0
+    return compute_cost_paise(
+        pricing, diagnosis.llm_model, diagnosis.input_tokens, diagnosis.output_tokens
+    )
+
+
 # ---------------------------------------------------------------------------
 # sections
 # ---------------------------------------------------------------------------
 
 
 def _section_production_run(
-    diagnoser: Diagnoser, episodes: list[tuple[Episode, str]], class_ids: list[str]
+    diagnoser: Diagnoser,
+    episodes: list[tuple[Episode, str]],
+    class_ids: list[str],
+    pricing: PricingTable,
 ) -> dict[str, Any]:
     regex_count = 0
     llm_count = 0
     llm_unavailable_count = 0
     total_cost_paise = 0
+    total_historical_cost_paise = 0
     cache_hits = 0
     llm_calls_attempted = 0
     pairs: list[tuple[str, str]] = []
@@ -301,6 +321,7 @@ def _section_production_run(
             llm_count += 1
             llm_calls_attempted += 1
             total_cost_paise += diagnosis.cost_paise
+            total_historical_cost_paise += _historical_cost_paise(pricing, diagnosis)
             if diagnosis.cache_hit:
                 cache_hits += 1
         pairs.append((diagnosis.class_id, true_class))
@@ -317,6 +338,7 @@ def _section_production_run(
         "llm_calls_attempted": llm_calls_attempted,
         "llm_cache_hits": cache_hits,
         "total_cost_paise": total_cost_paise,
+        "total_historical_cost_paise": total_historical_cost_paise,
         "cost_paise_per_100_episodes": cost_paise_per_100,
         "cost_rupees_per_100_episodes": round(cost_paise_per_100 / 100, 4),
         "accuracy_self_graded": round(_accuracy(pairs), 4),
@@ -325,7 +347,11 @@ def _section_production_run(
 
 
 def _section_independent(
-    baseline: RegexBaseline, diagnoser: Diagnoser, episodes: list[tuple[Episode, str]], label: str
+    baseline: RegexBaseline,
+    diagnoser: Diagnoser,
+    episodes: list[tuple[Episode, str]],
+    label: str,
+    pricing: PricingTable,
 ) -> dict[str, Any]:
     # An unresolved regex prediction (None) is never treated as excluded —
     # it can never equal a real class_id, so _accuracy() below counts it as
@@ -335,6 +361,9 @@ def _section_independent(
     regex_accuracy = _accuracy(regex_pairs)
 
     llm_pairs: list[tuple[str, str]] = []
+    llm_cost_paise = 0
+    llm_historical_cost_paise = 0
+    llm_cache_hits = 0
     llm_skipped = False
     llm_skip_reason = ""
     for ep, true in episodes:
@@ -345,11 +374,17 @@ def _section_independent(
             llm_skip_reason = str(exc)
             break
         llm_pairs.append((diagnosis.class_id, true))
+        llm_cost_paise += diagnosis.cost_paise
+        llm_historical_cost_paise += _historical_cost_paise(pricing, diagnosis)
+        llm_cache_hits += int(diagnosis.cache_hit)
 
     result: dict[str, Any] = {
         "label": label,
         "n_episodes": len(episodes),
         "regex_accuracy": round(regex_accuracy, 4),
+        "llm_cost_paise": llm_cost_paise,
+        "llm_historical_cost_paise": llm_historical_cost_paise,
+        "llm_cache_hits": llm_cache_hits,
     }
     if llm_skipped:
         result["llm_accuracy"] = None
@@ -363,6 +398,7 @@ def _section_head_to_head(
     baseline: RegexBaseline,
     diagnoser: Diagnoser,
     episodes: list[tuple[Episode, str]],
+    pricing: PricingTable,
     *,
     llm_max_per_family: int | None = None,
 ) -> dict[str, Any]:
@@ -390,6 +426,9 @@ def _section_head_to_head(
         regex_acc = _accuracy(regex_pairs)
         llm_members = members if llm_max_per_family is None else members[:llm_max_per_family]
         llm_pairs: list[tuple[str, str]] = []
+        llm_cost_paise = 0
+        llm_historical_cost_paise = 0
+        llm_cache_hits = 0
         skipped = False
         skip_reason = ""
         for ep, true in llm_members:
@@ -400,6 +439,9 @@ def _section_head_to_head(
                 skip_reason = str(exc)
                 break
             llm_pairs.append((diagnosis.class_id, true))
+            llm_cost_paise += diagnosis.cost_paise
+            llm_historical_cost_paise += _historical_cost_paise(pricing, diagnosis)
+            llm_cache_hits += int(diagnosis.cache_hit)
         llm_acc = None if skipped else _accuracy(llm_pairs)
         if skipped:
             winner = "n/a (LLM not run)"
@@ -415,6 +457,9 @@ def _section_head_to_head(
             "llm_sample_size": None if skipped else len(llm_members),
             "regex_accuracy": round(regex_acc, 4),
             "llm_accuracy": None if skipped else round(llm_acc, 4),
+            "llm_cost_paise": llm_cost_paise,
+            "llm_historical_cost_paise": llm_historical_cost_paise,
+            "llm_cache_hits": llm_cache_hits,
             "llm_skipped_reason": skip_reason if skipped else None,
             "winner": winner,
         }
@@ -448,7 +493,16 @@ def _section_head_to_head(
     else:
         summary = f"regex and the LLM tied across the top {len(rows)} error families by volume."
 
-    return {"top_families": rows, "tail": tail_row, "summary": summary}
+    all_rows = rows + ([tail_row] if tail_row else [])
+    total_llm_cost_paise = sum(r["llm_cost_paise"] for r in all_rows)
+    total_llm_historical_cost_paise = sum(r["llm_historical_cost_paise"] for r in all_rows)
+    return {
+        "top_families": rows,
+        "tail": tail_row,
+        "summary": summary,
+        "total_llm_cost_paise": total_llm_cost_paise,
+        "total_llm_historical_cost_paise": total_llm_historical_cost_paise,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -480,9 +534,14 @@ def _print_report(
             "none is configured — excluded from accuracy below, not fabricated."
         )
     print(
-        f"cost: {production['total_cost_paise']} paise total -> "
+        f"cost this run: {production['total_cost_paise']} paise total -> "
         f"{production['cost_paise_per_100_episodes']:.2f} paise "
-        f"(Rs {production['cost_rupees_per_100_episodes']:.2f}) per 100 episodes"
+        f"(Rs {production['cost_rupees_per_100_episodes']:.2f}) per 100 episodes "
+        "(0 on a cache hit — see 'real cost' below for what it cost the first time)"
+    )
+    print(
+        "real cost (ignores cache, from actual token usage): "
+        f"{production['total_historical_cost_paise']} paise"
     )
 
     print("\n--- 2. self-graded metrics (vs this project's own generator truth) ---")
@@ -506,6 +565,12 @@ def _print_report(
         )
         if section.get("llm_skipped_reason"):
             print(f"    llm skipped: {section['llm_skipped_reason']}")
+        else:
+            print(
+                f"    llm cost this run: {section['llm_cost_paise']} paise, "
+                f"real cost: {section['llm_historical_cost_paise']} paise "
+                f"(cache hits: {section['llm_cache_hits']}/{section['n_episodes']})"
+            )
 
     print("\n--- 4. THE HEAD-TO-HEAD: top error families by volume, regex vs LLM ---")
 
@@ -523,7 +588,31 @@ def _print_report(
         print(_format_row(row))
     if head_to_head["tail"]:
         print(_format_row(head_to_head["tail"]))
+    print(
+        f"llm cost this section — this run: {head_to_head['total_llm_cost_paise']} paise, "
+        f"real cost: {head_to_head['total_llm_historical_cost_paise']} paise"
+    )
     print(f"\n{head_to_head['summary']}\n")
+
+    grand_total_this_run = (
+        production["total_cost_paise"]
+        + sum(s["llm_cost_paise"] for s in externally_anchored)
+        + head_to_head["total_llm_cost_paise"]
+    )
+    grand_total_real = (
+        production["total_historical_cost_paise"]
+        + sum(s["llm_historical_cost_paise"] for s in externally_anchored)
+        + head_to_head["total_llm_historical_cost_paise"]
+    )
+    print("--- 5. total LLM spend across every section ---")
+    print(
+        f"this run (cache-aware): {grand_total_this_run} paise "
+        f"(Rs {grand_total_this_run / 100:.2f})"
+    )
+    print(
+        f"real (what it actually cost to build this cache): {grand_total_real} paise "
+        f"(Rs {grand_total_real / 100:.2f})\n"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -550,6 +639,7 @@ def main() -> int:
     bundle = load_all()
     taxonomy = bundle.taxonomy
     class_ids = taxonomy.class_ids()
+    pricing = load_pricing()
 
     baseline = RegexBaseline(taxonomy)
     cache = DiskCache(settings.cache_dir)
@@ -558,24 +648,35 @@ def main() -> int:
 
     episodes = _load_train() if args.split == "train" else _load_sealed_with_labels()
 
-    production = _section_production_run(diagnoser, episodes, class_ids)
+    production = _section_production_run(diagnoser, episodes, class_ids, pricing)
 
     externally_anchored = [
         _section_independent(
             baseline, diagnoser, _load_harvested_raw(taxonomy),
-            "harvested strings (raw, real fields)",
+            "harvested strings (raw, real fields)", pricing,
         ),
         _section_independent(
             baseline, diagnoser, _load_doc_anchored(taxonomy),
-            "Razorpay doc snapshot (independent label source)",
+            "Razorpay doc snapshot (independent label source)", pricing,
         ),
     ]
 
     head_to_head = _section_head_to_head(
-        baseline, diagnoser, episodes, llm_max_per_family=args.llm_max_per_family
+        baseline, diagnoser, episodes, pricing, llm_max_per_family=args.llm_max_per_family
     )
 
     _print_report(args.split, production, externally_anchored, head_to_head)
+
+    grand_total_this_run = (
+        production["total_cost_paise"]
+        + sum(s["llm_cost_paise"] for s in externally_anchored)
+        + head_to_head["total_llm_cost_paise"]
+    )
+    grand_total_real = (
+        production["total_historical_cost_paise"]
+        + sum(s["llm_historical_cost_paise"] for s in externally_anchored)
+        + head_to_head["total_llm_historical_cost_paise"]
+    )
 
     METRICS_OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     METRICS_OUT_PATH.write_text(
@@ -585,6 +686,10 @@ def main() -> int:
                 "production_run": production,
                 "externally_anchored": externally_anchored,
                 "head_to_head": head_to_head,
+                "grand_total_llm_cost_paise_this_run": grand_total_this_run,
+                "grand_total_llm_cost_rupees_this_run": round(grand_total_this_run / 100, 4),
+                "grand_total_llm_cost_paise_real": grand_total_real,
+                "grand_total_llm_cost_rupees_real": round(grand_total_real / 100, 4),
             },
             indent=2,
             sort_keys=True,

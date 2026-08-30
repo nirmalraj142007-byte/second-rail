@@ -3,21 +3,34 @@
     {
       "label": "harvested strings (raw, real fields)",
       "llm_accuracy": 0.2,
+      "llm_cache_hits": 20,
+      "llm_cost_paise": 0,
+      "llm_historical_cost_paise": 20,
       "n_episodes": 20,
       "regex_accuracy": 0.05
     },
     {
       "label": "Razorpay doc snapshot (independent label source)",
       "llm_accuracy": 0.8824,
+      "llm_cache_hits": 17,
+      "llm_cost_paise": 0,
+      "llm_historical_cost_paise": 17,
       "n_episodes": 17,
       "regex_accuracy": 0.8235
     }
   ],
+  "grand_total_llm_cost_paise_real": 85,
+  "grand_total_llm_cost_paise_this_run": 0,
+  "grand_total_llm_cost_rupees_real": 0.85,
+  "grand_total_llm_cost_rupees_this_run": 0.0,
   "head_to_head": {
     "summary": "regex and the LLM tied across the top 5 error families by volume.",
     "tail": {
       "family": "(tail \u2014 remaining lower-volume families)",
       "llm_accuracy": 1.0,
+      "llm_cache_hits": 8,
+      "llm_cost_paise": 0,
+      "llm_historical_cost_paise": 8,
       "llm_sample_size": 8,
       "llm_skipped_reason": null,
       "regex_accuracy": 1.0,
@@ -28,6 +41,9 @@
       {
         "family": "insufficient_fund",
         "llm_accuracy": 1.0,
+        "llm_cache_hits": 8,
+        "llm_cost_paise": 0,
+        "llm_historical_cost_paise": 8,
         "llm_sample_size": 8,
         "llm_skipped_reason": null,
         "regex_accuracy": 1.0,
@@ -37,6 +53,9 @@
       {
         "family": "gateway_technical_error",
         "llm_accuracy": 1.0,
+        "llm_cache_hits": 8,
+        "llm_cost_paise": 0,
+        "llm_historical_cost_paise": 8,
         "llm_sample_size": 8,
         "llm_skipped_reason": null,
         "regex_accuracy": 1.0,
@@ -46,6 +65,9 @@
       {
         "family": "authentication_failed",
         "llm_accuracy": 1.0,
+        "llm_cache_hits": 8,
+        "llm_cost_paise": 0,
+        "llm_historical_cost_paise": 8,
         "llm_sample_size": 8,
         "llm_skipped_reason": null,
         "regex_accuracy": 1.0,
@@ -55,6 +77,9 @@
       {
         "family": "card_declined",
         "llm_accuracy": 1.0,
+        "llm_cache_hits": 8,
+        "llm_cost_paise": 0,
+        "llm_historical_cost_paise": 8,
         "llm_sample_size": 8,
         "llm_skipped_reason": null,
         "regex_accuracy": 1.0,
@@ -64,13 +89,18 @@
       {
         "family": "card_number_invalid",
         "llm_accuracy": 1.0,
+        "llm_cache_hits": 8,
+        "llm_cost_paise": 0,
+        "llm_historical_cost_paise": 8,
         "llm_sample_size": 8,
         "llm_skipped_reason": null,
         "regex_accuracy": 1.0,
         "volume": 39,
         "winner": "tie"
       }
-    ]
+    ],
+    "total_llm_cost_paise": 0,
+    "total_llm_historical_cost_paise": 48
   },
   "production_run": {
     "accuracy_self_graded": 1.0,
@@ -139,7 +169,8 @@
       }
     },
     "regex_resolved": 400,
-    "total_cost_paise": 0
+    "total_cost_paise": 0,
+    "total_historical_cost_paise": 0
   },
   "split": "train"
 }
