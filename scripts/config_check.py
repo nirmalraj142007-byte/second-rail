@@ -25,6 +25,7 @@ OUTCOME_MODEL_PATH = ROOT / "outcome_model.md"
 
 _ATTRIBUTION_WINDOW_RE = re.compile(r"\*\*(\d+)\s*hours from action execution\.\*\*")
 _NUMERIC_RE = re.compile(r"\d")
+_EXPERIMENT_PROVENANCE_RE = re.compile(r"experiments/|not experimentally derived:")
 
 
 def _load_harvest_records(path: Path) -> dict[str, dict]:
@@ -164,6 +165,41 @@ def check_guardrails_numeric_comments(path: Path) -> tuple[bool, str]:
     return True, f"every numeric threshold line in {path.name} carries a trailing comment"
 
 
+def check_guardrails_experiment_provenance(path: Path) -> tuple[bool, str]:
+    """Every numeric threshold line in guardrails.yaml must trace to either
+    an experiment (`experiments/thresholds/*.md`, Phase 14) or an explicit
+    `# not experimentally derived: <reason>` marker — a panelist picking a
+    number at random (CLAUDE.md/judge expectations) gets a real answer
+    either way, and a bare "policy choice" comment with no marker no
+    longer counts as one. Stricter than check 7 above, which only demands
+    *some* trailing comment exists."""
+    if not path.exists():
+        return False, f"{path} not found"
+    problems: list[tuple[int, str]] = []
+    checked = 0
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or ":" not in stripped:
+            continue
+        code_part, _, comment_part = line.partition("#")
+        key = code_part.split(":", 1)[0].strip()
+        value = code_part.split(":", 1)[1]
+        if not _NUMERIC_RE.search(value):
+            continue
+        checked += 1
+        if not _EXPERIMENT_PROVENANCE_RE.search(comment_part):
+            problems.append((lineno, key))
+    if problems:
+        return False, (
+            "numeric threshold line(s) missing an 'experiments/' reference or an explicit "
+            f"'not experimentally derived: <reason>' marker: {problems}"
+        )
+    return True, (
+        f"all {checked} numeric threshold line(s) in {path.name} trace to an experiment or "
+        "carry an explicit non-experimental marker"
+    )
+
+
 def check_attribution_window(bundle: ConfigBundle, outcome_model_path: Path) -> tuple[bool, str]:
     if not outcome_model_path.exists():
         return False, f"{outcome_model_path} not found"
@@ -232,6 +268,10 @@ def main() -> int:
             "8. attribution_window_hours matches outcome_model.md",
             *check_attribution_window(bundle, OUTCOME_MODEL_PATH),
         ))
+    results.append((
+        "9. every guardrails.yaml numeric threshold traces to an experiment or a marker",
+        *check_guardrails_experiment_provenance(GUARDRAILS_PATH),
+    ))
 
     for name, ok, detail in results:
         print(f"{'PASS' if ok else 'FAIL'}: {name} - {detail}")

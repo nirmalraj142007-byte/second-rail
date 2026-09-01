@@ -7,7 +7,7 @@ src = ["src", "tests"]
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["src", "scripts", "data"]
+known-first-party = ["src", "scripts", "data", "experiments"]
 
 [tool.ruff.lint.per-file-ignores]
 # Verbatim Razorpay doc strings — reflowing them would violate "verbatim

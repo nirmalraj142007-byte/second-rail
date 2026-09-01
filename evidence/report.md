@@ -1,5 +1,5 @@
 # Second Rail — Results
-Run `01M1EA7BM2E3RYDM4A6C5HT9H0` · `120a08c` · config `9e22c9aa673f…` · 2026-09-01T16:33:56+05:30
+Run `01M1EC64PA49P2QT1230919DG0` · `3fab804` · config `9e22c9aa673f…` · 2026-09-01T17:08:15+05:30
 Sealed split: sha256 verified — 200 episodes (see `holdout/SEAL.sha256`) · shift: BANK_E is reserved for the sealed split only.
 
 Attribution rule AR-01, window 48h.
@@ -35,7 +35,7 @@ Stopping rule fired this run: `cap_breach` — the batch was 200 episodes, 131 w
 
 ### Throughput and LLM cost
 
-Throughput: 1327.3 episodes/min over 131 of 200 sealed episodes processed.
+Throughput: 1445.7 episodes/min over 131 of 200 sealed episodes processed.
 
 LLM cost this run (cache-aware, 0 paise on every cache hit): Rs 0.00 (measured), Rs 0.00 (measured) per 100 episodes.
 

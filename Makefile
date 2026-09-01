@@ -12,7 +12,7 @@ else
 	PIP := $(VENV_BIN)/pip
 endif
 
-.PHONY: setup doctor lint test clean data seal verify-seal eval demo approve verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve tunnel replay-webhooks gate-run failure-demo failure-demo-backup guardrail-proof classify choose-run watch
+.PHONY: setup doctor lint test clean data seal verify-seal eval demo approve verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve tunnel replay-webhooks gate-run failure-demo failure-demo-backup guardrail-proof classify choose-run watch thresholds
 
 setup:
 	$(PYTHON311) -m venv .venv
@@ -23,7 +23,7 @@ doctor:
 	$(PY) -m src.config doctor
 
 lint:
-	$(PY) -m ruff check src tests scripts
+	$(PY) -m ruff check src tests scripts experiments
 
 test:
 	$(PY) -m pytest -q
@@ -103,6 +103,17 @@ db-check:
 
 config-check:
 	$(PY) -m scripts.config_check
+
+# Phase 14 — sweeps auto_approve_ceiling_paise, outage_cluster_threshold,
+# and executor_retry_cap over real code (GateEngine / compute_cluster_
+# membership / RazorpayExecutor), never a simulated result. Writes
+# experiments/thresholds/{auto_approve,outage_cluster,retry_cap}.md +
+# charts/*.png + results_*.json. No LLM calls, no network, no key
+# required — runs in well under a minute.
+thresholds:
+	$(PY) -m experiments.thresholds.run_auto_approve
+	$(PY) -m experiments.thresholds.run_outage_cluster
+	$(PY) -m experiments.thresholds.run_retry_cap
 
 # SPLIT=train|sealed (required). Regex-vs-LLM head-to-head, coverage, cost,
 # self-graded + externally-anchored classification metrics. Writes

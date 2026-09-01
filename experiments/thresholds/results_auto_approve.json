@@ -1,0 +1,62 @@
+[
+  {
+    "auto_approve_ceiling_paise": 100000,
+    "auto_approve_ceiling_rupees": 1000.0,
+    "total_episodes": 400,
+    "tier_counts_all_episodes": {
+      "auto": 192,
+      "human_keystroke": 163,
+      "hard_refuse": 45
+    },
+    "human_keystroke_pct_of_all_episodes": 40.8,
+    "gate_eligible_count": 108,
+    "auto_approved_exposure_paise": 2667940,
+    "auto_approved_exposure_rupees": 26679.4,
+    "high_value_unreviewed_count": 17
+  },
+  {
+    "auto_approve_ceiling_paise": 200000,
+    "auto_approve_ceiling_rupees": 2000.0,
+    "total_episodes": 400,
+    "tier_counts_all_episodes": {
+      "auto": 256,
+      "human_keystroke": 99,
+      "hard_refuse": 45
+    },
+    "human_keystroke_pct_of_all_episodes": 24.8,
+    "gate_eligible_count": 108,
+    "auto_approved_exposure_paise": 5445064,
+    "auto_approved_exposure_rupees": 54450.64,
+    "high_value_unreviewed_count": 20
+  },
+  {
+    "auto_approve_ceiling_paise": 500000,
+    "auto_approve_ceiling_rupees": 5000.0,
+    "total_episodes": 400,
+    "tier_counts_all_episodes": {
+      "auto": 321,
+      "human_keystroke": 34,
+      "hard_refuse": 45
+    },
+    "human_keystroke_pct_of_all_episodes": 8.5,
+    "gate_eligible_count": 108,
+    "auto_approved_exposure_paise": 10652558,
+    "auto_approved_exposure_rupees": 106525.58,
+    "high_value_unreviewed_count": 25
+  },
+  {
+    "auto_approve_ceiling_paise": 1000000,
+    "auto_approve_ceiling_rupees": 10000.0,
+    "total_episodes": 400,
+    "tier_counts_all_episodes": {
+      "auto": 341,
+      "human_keystroke": 14,
+      "hard_refuse": 45
+    },
+    "human_keystroke_pct_of_all_episodes": 3.5,
+    "gate_eligible_count": 108,
+    "auto_approved_exposure_paise": 15796237,
+    "auto_approved_exposure_rupees": 157962.37,
+    "high_value_unreviewed_count": 26
+  }
+]

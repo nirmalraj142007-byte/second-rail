@@ -1,0 +1,46 @@
+[
+  {
+    "executor_retry_cap": 1,
+    "recovered": 2,
+    "abandoned": 13,
+    "total_episodes": 15,
+    "total_api_calls": 15,
+    "wasted_calls_on_abandoned_episodes": 13,
+    "total_modeled_wall_clock_seconds": 0.0,
+    "mean_seconds_to_abandon": 0.0,
+    "max_k_recovered": 0
+  },
+  {
+    "executor_retry_cap": 3,
+    "recovered": 5,
+    "abandoned": 10,
+    "total_episodes": 15,
+    "total_api_calls": 39,
+    "wasted_calls_on_abandoned_episodes": 30,
+    "total_modeled_wall_clock_seconds": 35.0,
+    "mean_seconds_to_abandon": 3.0,
+    "max_k_recovered": 2
+  },
+  {
+    "executor_retry_cap": 5,
+    "recovered": 7,
+    "abandoned": 8,
+    "total_episodes": 15,
+    "total_api_calls": 58,
+    "wasted_calls_on_abandoned_episodes": 40,
+    "total_modeled_wall_clock_seconds": 111.0,
+    "mean_seconds_to_abandon": 11.0,
+    "max_k_recovered": 4
+  },
+  {
+    "executor_retry_cap": 10,
+    "recovered": 10,
+    "abandoned": 5,
+    "total_episodes": 15,
+    "total_api_calls": 90,
+    "wasted_calls_on_abandoned_episodes": 50,
+    "total_modeled_wall_clock_seconds": 239.0,
+    "mean_seconds_to_abandon": 31.0,
+    "max_k_recovered": 8
+  }
+]

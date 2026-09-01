@@ -1,16 +1,16 @@
 # Second Rail — guardrail thresholds. Every money-adjacent number the
 # system enforces lives here, not in src/. See CLAUDE.md non-negotiables.
-max_actions_per_payment: 1          # one recovery attempt per payment_id, ever — no repeat nudges on the same episode
-max_contacts_per_customer_7d: 2     # cross-episode cap so one customer isn't nudged repeatedly in a week
-quiet_hours: {start: "21:00", end: "09:00", tz: "Asia/Kolkata"}   # hard block — no customer contact overnight
-max_episode_age_hours: 72           # matches outcome_model.md's rationale for the attribution window staying shorter than this
-auto_approve_ceiling_paise: 500000  # TODO justify — Phase 14 experiment; currently set to match policy_table.yaml band A2's max
-batch_contact_ceiling: 50           # max customers contacted in one run, caps blast radius of a bad config
-per_run_exposure_ceiling_paise: 20000000    # notional total link value a single run may create, not real money moved
-outage_cluster_threshold: 15        # TODO justify — Phase 14 experiment; feeds policy_table.yaml hard_refuse_conditions.issuer_outage_cluster
-executor_retry_cap: 3               # TODO justify — Phase 14 experiment
-executor_backoff_seconds: [1, 2, 4]  # seconds between retries, matches executor_retry_cap in length
-consecutive_executor_errors_stop: 3  # 3 back-to-back executor failures halts the run rather than burning through episodes blind
+max_actions_per_payment: 1          # not experimentally derived: one attempt per payment_id is the proposal's own scope contract (CLAUDE.md), not a tunable
+max_contacts_per_customer_7d: 2     # not experimentally derived: fixed compliance-style cadence cap, a policy choice like quiet_hours below, not swept
+quiet_hours: {start: "21:00", end: "09:00", tz: "Asia/Kolkata"}   # not experimentally derived: standard no-contact-overnight convention, a policy choice, not an optimisation target
+max_episode_age_hours: 72           # not experimentally derived: fixed so it stays longer than attribution_window_hours (48h) per outcome_model.md §3's reasoning, not swept independently
+auto_approve_ceiling_paise: 500000  # Rs 5,000 — queue 8.5% of 400 train episodes, exposure Rs 106,526/run; Rs 2,000 already pushes the queue to 24.8%; see experiments/thresholds/auto_approve.md
+batch_contact_ceiling: 50           # not experimentally derived: blast-radius cap on a bad config, not swept this phase — see experiments/thresholds/auto_approve.md's method section for why it had to be held fixed while sweeping auto_approve_ceiling_paise
+per_run_exposure_ceiling_paise: 20000000    # not experimentally derived: notional per-run cap, not swept this phase
+outage_cluster_threshold: 15        # catches the full 40-episode planted outage with 0% false escalations on the train split; threshold=40 (matching cluster size) misses it entirely — see experiments/thresholds/outage_cluster.md
+executor_retry_cap: 3               # recovers 5/15 vs 10/15 at cap=10, for 20 fewer wasted API calls and ~28s less modeled wall-clock per still-abandoned episode; see experiments/thresholds/retry_cap.md
+executor_backoff_seconds: [1, 2, 4]  # not experimentally derived: sized to match executor_retry_cap's length; exercised (not independently swept) by experiments/thresholds/retry_cap.md
+consecutive_executor_errors_stop: 3  # not experimentally derived: 3 back-to-back failures as a systemic-failure signal, a policy choice, not swept this phase
 kill_switch_path: "KILL"            # presence of this file on disk halts the run before the next episode starts
 default_mode: dry_run               # execution requires --execute
-attribution_window_hours: 48        # must match outcome_model.md §3 — config_check asserts this
+attribution_window_hours: 48        # not experimentally derived: fixed in outcome_model.md §3 and cross-checked against it by scripts/config_check.py check 8, not swept this phase

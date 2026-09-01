@@ -1619,3 +1619,60 @@ de-emphasizes the win/loss framing, regardless of whether the
 head-to-head happens to tie, favour the LLM, or (on some future run)
 genuinely favour regex. `pytest -q -m "not live"` → 139 passed (138 +
 1 new); `ruff check` clean.
+
+## D7 (guardrail threshold experiments) — 1 Sep 2026
+
+Phase 14: three of `config/guardrails.yaml`'s numbers
+(`auto_approve_ceiling_paise`, `outage_cluster_threshold`,
+`executor_retry_cap`) had a `# TODO justify` comment instead of a reason.
+Built `experiments/thresholds/run_{auto_approve,outage_cluster,retry_cap}.py`
+— each sweeps one threshold against real production code (`GateEngine`,
+`compute_cluster_membership`, `RazorpayExecutor`), never a hand-simulated
+number — and `scripts/config_check.py` check 9, which now fails the
+build if any numeric line in `guardrails.yaml` lacks either an
+`experiments/` reference or an explicit `# not experimentally derived:
+<reason>` marker. `make thresholds && make config-check` both pass; none
+of the three configured values changed — all three experiments confirmed
+the number already committed, not reversed it.
+
+**What surprised me, even though it didn't change a value.** I expected
+the `outage_cluster_threshold` sweep to show a false-escalation-vs-
+recall trade-off curve — the reason I picked {5, 10, 15, 25, 40} as sweep
+points in the first place. It doesn't: false escalations are 0% at every
+threshold from 5 to 25 on this dataset, because `data/generator.py`
+scatters ordinary episodes uniformly across a 30-day window, so
+coincidental 30-minute co-occurrence never happens by chance. The real
+finding is a boundary bug I hadn't considered: threshold=40, set to
+exactly match the planted cluster's size, misses the whole cluster
+(0/40 caught), because `compute_cluster_membership` requires a group to
+*exceed* the threshold (`hi - lo + 1 > threshold`), not merely equal it.
+Anyone tuning this threshold by "matching it to the outage size I want
+to catch" would silently build a gate that never fires. `config/
+guardrails.yaml`'s comment for this line, and `experiments/thresholds/
+outage_cluster.md`'s conclusion, both say this explicitly now. This also
+means the sweep can't actually validate 15 over 5 or 10 on false-
+escalation cost alone — disclosed as a limitation in that file's "what
+I would measure with more time" rather than papered over with a false
+five-point curve.
+
+**One bug caught before it produced a wrong number, not after.**
+`run_retry_cap.py`'s first working version logged "idempotency collision"
+warnings on nearly every synthetic episode, including ones that had
+never been inserted before. Spent the first pass assuming it was a
+genuine idempotency-key collision in my own payment_id scheme (checked:
+it wasn't — 15 distinct payment_ids, 15 distinct sha256 prefixes,
+astronomically unlikely to collide by chance). The real cause was
+`src/db/repo.py::insert_execution()` catching *any* `sqlite3.
+IntegrityError` and reporting it as `IdempotencyCollision` — including a
+`FOREIGN KEY constraint failed` on `execution.run_id` (`REFERENCES
+run(run_id)`), because my harness never called `start_run()` before
+building executors. The recovered/abandoned counts were already correct
+by luck (the mis-caught exception still didn't raise `ExecutorError`,
+so my counting logic didn't misclassify anything), but the log noise
+would have made a judge reading a live run distrust every real
+idempotency-collision log line in this codebase. Fixed by calling the
+same `start_run()` / `insert_episode()` helpers a real `Runner.run()`
+pass calls, not by touching `insert_execution()`'s broad except clause
+— that clause's breadth is itself worth narrowing, but is out of this
+phase's scope. `pytest -q -m "not live"` → 139 passed (unchanged);
+`ruff check src tests scripts experiments` clean.

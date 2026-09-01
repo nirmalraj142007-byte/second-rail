@@ -1,0 +1,47 @@
+[
+  {
+    "outage_cluster_threshold": 5,
+    "planted_cluster_size": 40,
+    "true_escalations": 40,
+    "planted_cluster_fully_caught": true,
+    "false_escalations": 0,
+    "false_escalation_rate_pct": 0.0,
+    "false_groups": {}
+  },
+  {
+    "outage_cluster_threshold": 10,
+    "planted_cluster_size": 40,
+    "true_escalations": 40,
+    "planted_cluster_fully_caught": true,
+    "false_escalations": 0,
+    "false_escalation_rate_pct": 0.0,
+    "false_groups": {}
+  },
+  {
+    "outage_cluster_threshold": 15,
+    "planted_cluster_size": 40,
+    "true_escalations": 40,
+    "planted_cluster_fully_caught": true,
+    "false_escalations": 0,
+    "false_escalation_rate_pct": 0.0,
+    "false_groups": {}
+  },
+  {
+    "outage_cluster_threshold": 25,
+    "planted_cluster_size": 40,
+    "true_escalations": 40,
+    "planted_cluster_fully_caught": true,
+    "false_escalations": 0,
+    "false_escalation_rate_pct": 0.0,
+    "false_groups": {}
+  },
+  {
+    "outage_cluster_threshold": 40,
+    "planted_cluster_size": 40,
+    "true_escalations": 0,
+    "planted_cluster_fully_caught": false,
+    "false_escalations": 0,
+    "false_escalation_rate_pct": 0.0,
+    "false_groups": {}
+  }
+]
