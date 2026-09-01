@@ -94,10 +94,32 @@ def main(
         "--dry-run-first",
         help="Validate the plan end-to-end with FixtureExecutor before spending a real call.",
     ),
+    consecutive_error_tolerance: int = typer.Option(
+        5,
+        "--consecutive-error-tolerance",
+        help=(
+            "Overrides guardrails.yaml's consecutive_executor_errors_stop (3) for THIS "
+            "tool only — config/guardrails.yaml itself is never touched, and every other "
+            "code path (src/runner.py's production runs, make demo, make eval) keeps "
+            "reading the shared default of 3 from the file. Raised here because sustained "
+            "real-API calls at volume produce sporadic Razorpay-side 429s (confirmed via "
+            "real response bodies, not injected faults, not a bug) that are not a systemic "
+            "failure signal specifically for a tool whose entire job is deliberately "
+            "hammering the real API at volume — see BUILD_LOG.md."
+        ),
+    ),
 ) -> None:
     setup_logging()
     settings = load_settings()
     bundle = load_all()
+    if consecutive_error_tolerance != bundle.guardrails.consecutive_executor_errors_stop:
+        bundle = bundle.model_copy(
+            update={
+                "guardrails": bundle.guardrails.model_copy(
+                    update={"consecutive_executor_errors_stop": consecutive_error_tolerance}
+                )
+            }
+        )
     g = bundle.guardrails
 
     DEMO_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -142,14 +164,33 @@ def main(
         summary = runner.run(episode_slice, mode, run_id=run_id)
         print(f"first pass: {summary.by_outcome}")
 
-        # Second pass: re-submit every episode through the SAME (now
-        # fault-exhausted) rig. Every configured fault index is <= n, and
-        # the rig's internal counter keeps climbing past n on this second
-        # pass, so none of the four faults fire again — every call here
-        # goes straight to the inner executor's own idempotency check,
-        # which is exactly what this pass is measuring.
+        # Second pass: re-submit every episode the FIRST pass actually
+        # reached through the SAME (now fault-exhausted) rig. Every
+        # configured fault index is <= n, and the rig's internal counter
+        # keeps climbing past n on this second pass, so none of the four
+        # faults fire again — every call here goes straight to the inner
+        # executor's own idempotency check, which is exactly what this
+        # pass is measuring.
+        #
+        # "Actually reached" matters: a stopping rule (src/gate/stopping.py)
+        # can halt the first pass before it processes the full slice —
+        # this was assumed impossible when the second pass unconditionally
+        # iterated all of episode_slice, but a real, unplanned run of
+        # genuine 429s (beyond the four deliberately-injected faults) hit
+        # exactly that: consecutive_executor_errors_stop=3 fired after 8
+        # episodes, leaving the other 100 never attempted at all. Re-
+        # submitting one of THOSE through create_recovery_link() is not an
+        # idempotency check — it is a fresh first-ever attempt, with
+        # nothing on file yet to detect a duplicate against — and if it
+        # also failed for real, ExecutorError propagated straight out of
+        # this unguarded loop and crashed the whole script. Bounding the
+        # second pass to the same prefix the first pass actually covered
+        # keeps every second-pass call a genuine re-submission, matching
+        # this pass's own documented purpose, and makes it impossible for
+        # this loop to attempt an episode the first pass never touched.
+        processed_count = len(episode_slice) - summary.by_outcome.get("pending", 0)
         idempotency_hits = 0
-        for ep in episode_slice:
+        for ep in episode_slice[:processed_count]:
             second_result = inner_executor.create_recovery_link(
                 episode=ep, action=PLACEHOLDER_ACTION,
                 policy_rule_id=PLACEHOLDER_POLICY_RULE, run_id=run_id,
@@ -203,12 +244,15 @@ def main(
         result = {
             "run_id": run_id,
             "n": n,
+            "processed_count": processed_count,
+            "stopped_reason": summary.stopped_reason,
+            "consecutive_error_tolerance": consecutive_error_tolerance,
             "mode": "dry_run_first" if dry_run_first else "live",
             "duplicate_links_created": duplicate_links_created,
             "cap_breaches": cap_breach_rows,
             "quiet_hour_contacts": quiet_hour_rows,
             "idempotency_detected": idempotency_hits,
-            "idempotency_total": len(episode_slice),
+            "idempotency_total": processed_count,
             "verification_note": verification_note,
             "fault_plan": asdict(plan),
         }
@@ -231,6 +275,12 @@ def main(
     OUTPUT_PATH.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     print()
+    if result["stopped_reason"]:
+        print(
+            f"NOTE: stopping rule '{result['stopped_reason']}' fired — only "
+            f"{result['processed_count']}/{n} requested episode(s) were actually "
+            "reached this run."
+        )
     print(f"duplicate links created: {result['duplicate_links_created']}  (must be 0)")
     print(f"cap breaches: {result['cap_breaches']}  quiet-hour contacts: "
           f"{result['quiet_hour_contacts']}  (both must be 0)")

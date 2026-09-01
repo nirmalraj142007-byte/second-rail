@@ -172,6 +172,15 @@ class PolicyTable(BaseModel):
     rules: list[PolicyRule]
     default_rule: DefaultRule
     hard_refuse_conditions: list[HardRefuseCondition] = []
+    # Deterministic, LLM-free choice used by src/choose/selector.py when the
+    # LLM is unavailable or its response is unusable *for reasons other than
+    # choosing outside the admissible set* (a network failure, not a bad
+    # choice — see that module's docstring for the distinction). The first
+    # entry present in a given episode's admissible_actions wins. Every
+    # admissible_actions list is guaranteed to contain "no_action" (the
+    # validator below), so ending this list with "no_action" guarantees it
+    # always resolves.
+    fallback_priority: list[str] = []
 
     @model_validator(mode="after")
     def _rules_are_unique_and_reference_known_ids(self) -> PolicyTable:
@@ -191,6 +200,19 @@ class PolicyTable(BaseModel):
         unknown_default_actions = set(self.default_rule.admissible_actions) - action_ids
         if unknown_default_actions:
             raise ValueError(f"default_rule: unknown action id(s) {unknown_default_actions}")
+        return self
+
+    @model_validator(mode="after")
+    def _fallback_priority_is_valid(self) -> PolicyTable:
+        action_ids = {a.id for a in self.actions}
+        unknown = set(self.fallback_priority) - action_ids
+        if unknown:
+            raise ValueError(f"fallback_priority: unknown action id(s) {unknown}")
+        if "no_action" not in self.fallback_priority:
+            raise ValueError(
+                "fallback_priority must include 'no_action' — every admissible_actions set "
+                "is guaranteed to contain it, so it is the only entry guaranteed to resolve"
+            )
         return self
 
     def is_total(self, cause_classes: list[str]) -> bool:

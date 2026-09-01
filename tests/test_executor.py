@@ -22,7 +22,7 @@ import pytest
 
 from src.db.migrate import get_connection, migrate
 from src.db.repo import insert_customer_if_absent, insert_episode, start_run
-from src.errors import ExecutorError
+from src.errors import ExecutorError, IdempotencyCollision
 from src.execute.executor import FaultInjectingExecutor, FixtureExecutor, RazorpayExecutor
 from src.execute.idempotency import idempotency_key, reference_id
 from src.execute.retry import BackoffError, with_backoff
@@ -401,6 +401,63 @@ class TestRazorpayExecutor:
             (idempotency_key(sample_episode.payment_id, "P-14"),),
         ).fetchone()
         assert row["status"] == "failed"
+
+    def test_idempotency_collision_recording_a_failed_attempt_does_not_crash(
+        self, temp_db: tuple[Path, sqlite3.Connection], sample_episode: Episode, monkeypatch
+    ) -> None:
+        """A row can land under this idempotency_key between the early
+        local-dedup check (Step 1) and the final insert after retries
+        exhaust — the "created" success path already handles exactly this
+        race (its own comment: "two threads entered at the same time with
+        the same key"); the "failed" path did not, and crashed with an
+        unhandled IdempotencyCollision instead of reporting the (still
+        real) failure. Forces the race deterministically by making
+        insert_execution() raise once, rather than relying on true
+        concurrency or on a second sequential call — which the early
+        dedup check already short-circuits before ever reaching the
+        retry loop, so it cannot exercise this path at all. Regression
+        test for the crash found running `make guardrail-proof` for
+        real: see BUILD_LOG.md."""
+        _, conn = temp_db
+        _seed_run_and_episode(conn, sample_episode)
+        monkeypatch.setattr("src.execute.executor.time.sleep", lambda _s: None)
+
+        calls = {"n": 0}
+
+        def _flaky_insert_execution(*args, **kwargs):
+            calls["n"] += 1
+            raise IdempotencyCollision(
+                "execution with idempotency_key=... already exists",
+                code="DUPLICATE_IDEMPOTENCY_KEY",
+            )
+
+        monkeypatch.setattr(
+            "src.execute.executor.insert_execution", _flaky_insert_execution
+        )
+
+        mock_client = Mock()
+        mock_client.create_payment_link_once.return_value = (
+            429,
+            {"error": {"description": "rate limited"}},
+        )
+
+        executor = RazorpayExecutor(
+            conn=conn,
+            client=mock_client,
+            mode="execute",
+            run_id="run_001",
+        )
+
+        # Before the fix, this raised IdempotencyCollision uncaught,
+        # crashing the caller instead of reporting the real failure below.
+        with pytest.raises(ExecutorError):
+            executor.create_recovery_link(
+                episode=sample_episode,
+                action="link_upi_alt",
+                policy_rule_id="P-14",
+                run_id="run_001",
+            )
+        assert calls["n"] == 1  # the collision was caught, not retried
 
     def test_cancel_link(self, temp_db: tuple[Path, sqlite3.Connection]) -> None:
         """Rollback cancels a link."""

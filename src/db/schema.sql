@@ -203,6 +203,14 @@ CREATE TABLE IF NOT EXISTS webhook_event (
     event_type TEXT,
     payment_id TEXT,
     plink_id TEXT,
+    -- order_id and amount_paise are populated only for terminal events
+    -- (payment.captured, payment_link.paid, payment_link.expired) — the
+    -- attribution watcher (src/attribute/watcher.py) needs both to decide
+    -- whether an outcome event references a link this run created and, if
+    -- so, how much was actually recovered. NULL for payment.failed, which
+    -- never carries an outcome to attribute.
+    order_id TEXT,
+    amount_paise INTEGER,
     raw_body_hash TEXT,
     signature_valid INTEGER,
     received_at TEXT,
@@ -215,9 +223,15 @@ CREATE INDEX IF NOT EXISTS idx_webhook_payment_time ON webhook_event(payment_id,
 
 CREATE TABLE IF NOT EXISTS attribution (
     attribution_id TEXT PRIMARY KEY,
-    episode_id TEXT REFERENCES episode(episode_id),
+    -- UNIQUE(episode_id): one attribution outcome per episode, ever — a
+    -- re-run of from_webhooks()/by_polling() for the same run replaces the
+    -- prior verdict for an episode rather than accumulating duplicates.
+    episode_id TEXT UNIQUE REFERENCES episode(episode_id),
     execution_id TEXT REFERENCES execution(execution_id),
     outcome TEXT CHECK(outcome IN ('recovered','not_recovered','pending','suppressed','execution_failed')),
+    -- Closed set of reason strings AR-01 resolves to — see
+    -- src/attribute/rules.py's module docstring for what each one means.
+    reason_code TEXT,
     recovered_amount_paise INTEGER,
     window_hours INTEGER,
     attributed_at TEXT,

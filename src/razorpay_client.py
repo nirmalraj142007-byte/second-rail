@@ -185,7 +185,17 @@ class RazorpayClient:
         """One page of the account's Payment Links, newest first. Razorpay's
         list endpoint has no server-side filter on `notes`, so callers that
         need "every link this run created" (guardrail_proof.py) must page
-        through this and filter client-side on notes.run_id themselves."""
+        through this and filter client-side on notes.run_id themselves.
+
+        The response key here is genuinely `payment_links`, not `items` —
+        confirmed against a real live call. `fetch_order_payments()` above
+        uses `items` correctly for *its* endpoint (`/orders/{id}/payments`,
+        a real Razorpay Collection response); this method used to copy
+        that same key, which meant it silently returned `[]` on every real
+        call regardless of how many links actually existed, and every
+        `duplicate_links_created` figure this ever produced was `max(0,
+        0 - distinct_keys)` — always 0, never actually checked against the
+        real API. See BUILD_LOG.md for how this was caught."""
         result = self._request("GET", f"/payment_links?count={count}&skip={skip}")
-        items = result.get("items", [])
+        items = result.get("payment_links", [])
         return list(items)

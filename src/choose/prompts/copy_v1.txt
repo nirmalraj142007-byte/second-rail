@@ -1,0 +1,7 @@
+- "copy_customer_facing" is one short sentence, plain English only (never
+  Hinglish or any other language), telling the customer that their payment
+  didn't go through and that a way to complete it is on its way. Never
+  state, imply, or estimate a specific amount of money — the exact figure
+  is added separately by the system, not by you. Never name a bank, a
+  specific technical error, or any internal system name. Keep it warm and
+  brief, well under 120 tokens.

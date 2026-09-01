@@ -1,0 +1,25 @@
+# Second Rail — customer-facing copy templates.
+#
+# Used only by src/choose/selector.py's deterministic fallback path, when
+# the LLM copy-drafting call is unavailable — never as a substitute for a
+# real LLM response that succeeded. English only (Hinglish generation was
+# cut — see the buildathon proposal's scope contract, "first two features
+# cut if I fall behind").
+#
+# No amount ever appears here, in any form: the rupee figure is injected
+# by src/execute/ directly from the episode's stored amount_paise, never
+# by a template or a model. See docs/where-the-llm-is-not.md, "Amount
+# computation."
+link_same_instrument: >-
+  We noticed your recent payment didn't go through. Here's a fresh, secure
+  link to complete it with the same payment method you tried before.
+link_alt_instrument: >-
+  Your recent payment didn't go through. Here's a secure link in case
+  you'd like to try a different payment method this time.
+defer_2h: >-
+  Your recent payment didn't go through. We'll send a fresh link shortly
+  in case it was a temporary issue on your end or your bank's.
+open_ticket: >-
+  We're looking into an issue with your recent payment and our support
+  team will follow up with you shortly.
+no_action: ""

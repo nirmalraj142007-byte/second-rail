@@ -12,7 +12,7 @@ from pathlib import Path
 
 SRC_ROOT = Path(__file__).resolve().parent.parent / "src"
 
-FORBIDDEN_PACKAGES = ("gate", "execute", "attribute", "audit", "ingest", "db")
+FORBIDDEN_PACKAGES = ("gate", "execute", "attribute", "audit", "ingest", "db", "report")
 FORBIDDEN_STRINGS = ("openai", "genai", "anthropic")
 
 

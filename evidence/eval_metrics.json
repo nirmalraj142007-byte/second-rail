@@ -1,0 +1,54 @@
+{
+  "admissibility_rate": 1.0,
+  "baseline_by_outcome": {
+    "actioned": 102,
+    "pending": 75,
+    "suppressed": 23
+  },
+  "baseline_recovery": {
+    "batch_size": 200,
+    "contacted_count": 102,
+    "fp_base_paise": 1520,
+    "fp_count": 1,
+    "fp_high_paise": 1970,
+    "fp_low_paise": 1070,
+    "gate_eligible_count": 102,
+    "gross_base_paise": 7346673,
+    "gross_high_paise": 9546447,
+    "gross_low_paise": 5142671,
+    "label": "FIXED_RETRY_AT_T30 baseline (Runner's gate-only fallback: every gate-eligible episode gets `placeholder_action`/`P-00`, unconditionally)",
+    "net_base_paise": 7345153,
+    "net_high_paise": 9544927,
+    "net_low_paise": 5141151,
+    "stopped_reason": "cap_breach"
+  },
+  "baseline_run_id": "01M1EA7JP04YNZVZNM275C51XV",
+  "classification_accuracy": 1.0,
+  "elapsed_s": 12.593000000109896,
+  "llm_cost_paise_real": 109,
+  "llm_cost_paise_this_run": 0,
+  "run_id": "01M1EA7BM2E3RYDM4A6C5HT9H0",
+  "second_rail_by_outcome": {
+    "actioned": 99,
+    "pending": 69,
+    "suppressed": 32
+  },
+  "second_rail_recovery": {
+    "batch_size": 200,
+    "contacted_count": 99,
+    "fp_base_paise": 1520,
+    "fp_count": 1,
+    "fp_high_paise": 1970,
+    "fp_low_paise": 1070,
+    "gate_eligible_count": 108,
+    "gross_base_paise": 7356692,
+    "gross_high_paise": 9559471,
+    "gross_low_paise": 5149684,
+    "label": "Second Rail",
+    "net_base_paise": 7355172,
+    "net_high_paise": 9557951,
+    "net_low_paise": 5148164,
+    "stopped_reason": "cap_breach"
+  },
+  "throughput_epm": 1327.254305973118
+}

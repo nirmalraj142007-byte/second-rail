@@ -1,0 +1,79 @@
+{
+  "action_distribution": {
+    "link_alt_instrument": 22,
+    "link_same_instrument": 8,
+    "no_action": 38,
+    "open_ticket": 332
+  },
+  "admissibility_rate": 1.0,
+  "decisions_inside_set": 400,
+  "episodes": 400,
+  "escalation_tier_distribution": {
+    "auto": 26,
+    "human_keystroke": 374
+  },
+  "features_used_outside_whitelist_episodes": 0,
+  "llm_cache_hits": 206,
+  "llm_cost_paise_this_run": 191,
+  "llm_degraded_count": 3,
+  "split": "train",
+  "worked_examples": [
+    {
+      "admissible_actions": [
+        "open_ticket",
+        "no_action"
+      ],
+      "cause_class": "C1",
+      "chosen_action": "open_ticket",
+      "episode_id": "epi_00052",
+      "features_used": [
+        "error_code",
+        "amount_band",
+        "segment",
+        "instrument",
+        "prior_contacts_7d",
+        "hours_since_failure"
+      ],
+      "features_used_outside_whitelist": [],
+      "policy_rule_id": "default_rule"
+    },
+    {
+      "admissible_actions": [
+        "open_ticket",
+        "no_action"
+      ],
+      "cause_class": "C2",
+      "chosen_action": "open_ticket",
+      "episode_id": "epi_00053",
+      "features_used": [
+        "error_code",
+        "amount_band",
+        "segment",
+        "instrument",
+        "prior_contacts_7d",
+        "hours_since_failure"
+      ],
+      "features_used_outside_whitelist": [],
+      "policy_rule_id": "default_rule"
+    },
+    {
+      "admissible_actions": [
+        "open_ticket",
+        "no_action"
+      ],
+      "cause_class": "C4",
+      "chosen_action": "open_ticket",
+      "episode_id": "epi_00054",
+      "features_used": [
+        "error_code",
+        "amount_band",
+        "segment",
+        "instrument",
+        "prior_contacts_7d",
+        "hours_since_failure"
+      ],
+      "features_used_outside_whitelist": [],
+      "policy_rule_id": "default_rule"
+    }
+  ]
+}

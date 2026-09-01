@@ -1,19 +1,22 @@
 {
-  "cancelled_count": 0,
+  "cancelled_count": 5,
   "cap_breaches": 0,
+  "consecutive_error_tolerance": 5,
   "duplicate_links_created": 0,
   "fault_plan": {
-    "inject_429_at_episode_index": 4,
+    "inject_429_at_episode_index": 21,
     "inject_429_repeat": 3,
-    "inject_5xx_at_index": 12,
-    "inject_duplicate_reference_at_index": 16,
-    "inject_timeout_at_index": 8
+    "inject_5xx_at_index": 64,
+    "inject_duplicate_reference_at_index": 86,
+    "inject_timeout_at_index": 43
   },
-  "idempotency_detected": 17,
-  "idempotency_total": 20,
-  "mode": "dry_run_first",
-  "n": 20,
+  "idempotency_detected": 10,
+  "idempotency_total": 10,
+  "mode": "live",
+  "n": 108,
+  "processed_count": 10,
   "quiet_hour_contacts": 0,
-  "run_id": "01M13TZPD7HV2CE8T63TSNS292",
-  "verification_note": "not verified against the real API (--dry-run-first)"
+  "run_id": "01M1E9KZGGD75A0DB1YP7H14P7",
+  "stopped_reason": "consecutive_executor_errors",
+  "verification_note": "5 link(s) on the real Razorpay API carry notes.run_id='01M1E9KZGGD75A0DB1YP7H14P7', vs 5 distinct idempotency key(s) recorded locally"
 }

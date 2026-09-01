@@ -130,9 +130,14 @@ Every reported metric here is a direct aggregation over `audit_record`,
 `decision`, `execution`, and `ledger_entry` rows — arithmetic over
 persisted facts, not a model's summary of them.
 
-**Where enforced:** the (not-yet-built) eval/report pipeline reads
-directly from SQLite and the hash-chained audit log; no LLM call sits
-between a persisted row and a reported number.
+**Where enforced:** `scripts/eval.py` and `src/report/` read directly from
+SQLite (`execution`, `exception_entry`, `decision`), the hash-chained audit
+log, and the sealed split's pre-registered `response_probability` field —
+no LLM call sits between a persisted row and a reported number.
+`src/report/render.py` goes one step further than a convention: it refuses
+to render a recovery-like figure that isn't an explicit (low, base, high)
+range of integers (`BareRecoveryValueError`), so a bare point estimate
+can't reach `evidence/report.md` even by accident.
 
 ## Action outside the admissible set
 
@@ -152,6 +157,36 @@ verified total by `make config-check`, check 4); `src/choose/` validates
 the model's response against that set before it can reach `src/execute/`,
 and `src/errors.py: AdmissibilityError` is the enforcement backstop if it
 doesn't.
+
+### The exact feature whitelist a selection prompt is allowed to see
+
+`src/choose/selector.py: LLM_VISIBLE_FEATURES` is the complete, closed list
+of episode-derived fields ever substituted into a selection prompt:
+
+```
+error_code, amount_band, segment, instrument, prior_contacts_7d, hours_since_failure
+```
+
+`amount_band` is the **band id** (`A1`/`A2`/`A3`), never the raw rupee or
+paise value — the model never learns what `A2`'s upper edge actually is,
+only which bucket this episode fell into. Nothing else reaches the prompt:
+no cap value, no threshold, no ceiling, no guardrail name, no policy rule
+text, and no amount in rupees or paise. The only other content in the
+prompt is the admissible action ids themselves (plus a one-line, non-money
+description of each) and the diagnosis's `class_id` and `confidence` —
+neither of which is a guardrail or a threshold.
+
+**Where enforced:** `tests/test_choose.py`'s
+`test_rendered_prompt_contains_no_forbidden_tokens` renders a real
+selection prompt against the real `config/` files and asserts it contains
+none of `"5000"`, `"ceiling"`, `"cap"`, `"quiet"`, `"threshold"`, the raw
+amount, or any `config/guardrails.yaml` key. If a model names a feature
+outside this whitelist in its `features_used` response (which it cannot
+be shown, so this would mean the model invented a field name), `select()`
+logs it and records it on the `Selection` rather than crashing — an
+interesting finding for the report, not a failure mode this project treats
+as adversarial the way it treats an inadmissible `chosen_action` (see
+"Action outside the admissible set" above).
 
 ## Anything that moves money
 

@@ -112,6 +112,50 @@ def extract_payment_id(payload: dict[str, Any]) -> str | None:
     return str(payment_id) if payment_id else None
 
 
+class TerminalEventFields(BaseModel):
+    """Best-effort extraction from a payment.captured / payment_link.paid /
+    payment_link.expired webhook body — everything src/attribute/watcher.py
+    needs to decide whether this event is the outcome of a link this run
+    created. Every field is Optional and this never raises: an outcome
+    event with a field missing just means that correlation path can't be
+    used for it, not that ingestion should fail."""
+
+    payment_id: str | None
+    order_id: str | None
+    plink_id: str | None
+    amount_paise: int | None
+
+
+def extract_terminal_event_fields(payload: dict[str, Any]) -> TerminalEventFields:
+    pl = payload.get("payload")
+    pl = pl if isinstance(pl, dict) else {}
+
+    payment_entity = pl.get("payment")
+    payment_entity = payment_entity.get("entity") if isinstance(payment_entity, dict) else None
+    payment_entity = payment_entity if isinstance(payment_entity, dict) else {}
+
+    link_entity = pl.get("payment_link")
+    link_entity = link_entity.get("entity") if isinstance(link_entity, dict) else None
+    link_entity = link_entity if isinstance(link_entity, dict) else {}
+
+    payment_id = extract_payment_id(payload)
+    order_id = payment_entity.get("order_id") or link_entity.get("order_id")
+    plink_id = link_entity.get("id")
+    amount = payment_entity.get("amount")
+    if amount is None:
+        # payment_link.paid carries the link's own "amount" too, which is
+        # the amount the link asked for — used as a fallback only when no
+        # payment entity is present (payment_link.expired never has one).
+        amount = link_entity.get("amount_paid") or link_entity.get("amount")
+
+    return TerminalEventFields(
+        payment_id=payment_id,
+        order_id=str(order_id) if order_id else None,
+        plink_id=str(plink_id) if plink_id else None,
+        amount_paise=int(amount) if amount is not None else None,
+    )
+
+
 def normalize_payment_failed(payload: dict[str, Any]) -> NormalizedEpisode:
     entity = _payment_entity(payload)
     path = "payload.payment.entity"

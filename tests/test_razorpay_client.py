@@ -113,6 +113,36 @@ def test_cancel_payment_link_hits_cancel_path():
     assert result["status"] == "cancelled"
 
 
+def test_list_payment_links_extracts_payment_links_key():
+    """Regression test: the real Razorpay list-payment-links response key
+    is `payment_links`, not `items` — confirmed against a real live call
+    (see BUILD_LOG.md). Before this fix, list_payment_links() read
+    result.get("items", []), which is correct for fetch_order_payments()'s
+    endpoint but wrong for this one, so it silently returned [] on every
+    real call regardless of how many links actually existed —
+    guardrail_proof.py's "duplicate links created" figure was never
+    actually checked against the real API as a result."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/payment_links"
+        body = {
+            "entity": "collection",
+            "count": 2,
+            "payment_links": [
+                {"id": "plink_1", "notes": {"run_id": "run_a"}},
+                {"id": "plink_2", "notes": {"run_id": "run_b"}},
+            ],
+        }
+        return httpx.Response(200, json=body)
+
+    links = _client(handler).list_payment_links(count=100, skip=0)
+
+    assert links == [
+        {"id": "plink_1", "notes": {"run_id": "run_a"}},
+        {"id": "plink_2", "notes": {"run_id": "run_b"}},
+    ]
+
+
 def test_fetch_payment_link_hits_get_path():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v1/payment_links/plink_1"

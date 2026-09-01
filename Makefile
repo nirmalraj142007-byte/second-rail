@@ -12,7 +12,7 @@ else
 	PIP := $(VENV_BIN)/pip
 endif
 
-.PHONY: setup doctor lint test clean data seal verify-seal eval demo approve verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve tunnel replay-webhooks gate-run failure-demo failure-demo-backup guardrail-proof classify
+.PHONY: setup doctor lint test clean data seal verify-seal eval demo approve verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve tunnel replay-webhooks gate-run failure-demo failure-demo-backup guardrail-proof classify choose-run watch
 
 setup:
 	$(PYTHON311) -m venv .venv
@@ -42,8 +42,13 @@ seal:
 verify-seal:
 	$(PY) -m scripts.seal verify
 
+# LIVE=1 swaps FixtureExecutor for RazorpayExecutor (real, still test-mode,
+# Payment Link creation). Default (no LIVE) is fixture mode: no network for
+# the executor, though the diagnose/choose LLM calls still hit the real
+# provider unless every prompt this run produces is already cached — see
+# scripts/eval.py's module docstring.
 eval:
-	@echo "not yet built — a later phase (make eval)"
+	$(PY) -m scripts.eval $(if $(LIVE),--live)
 
 # Sources default to data/train.jsonl + holdout/sealed.jsonl (600 episodes
 # combined) inside src/runner.py — see that file's module docstring for why
@@ -106,6 +111,15 @@ config-check:
 classify:
 	$(PY) -m scripts.classify --split $(SPLIT)
 
+# SPLIT=train|sealed (required). Real diagnose-then-choose cascade over
+# every episode: admissibility rate, chosen-action distribution, escalation
+# tier distribution, and the count of episodes where the model named a
+# feature outside LLM_VISIBLE_FEATURES. Writes evidence/choose_metrics.json.
+# Cached LLM responses make a second run of the same split free of both LLM
+# calls and network access.
+choose-run:
+	$(PY) -m scripts.choose_run --split $(SPLIT)
+
 # Primary failure demo (video beat 2:20-2:42) — real Razorpay test-mode
 # calls, a 12-episode slice, 429 injected at episode 7. Needs
 # RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET in .env.
@@ -123,6 +137,18 @@ failure-demo-backup:
 # --dry-run-first directly to the script — `make`'s own argument parser
 # cannot take a bare `--flag` after this target's name, so that flag must
 # go through this variable, or call `python -m scripts.guardrail_proof
-# --n N --dry-run-first` directly).
+# --n N --dry-run-first` directly). TOLERANCE=n overrides the tool's own
+# consecutive-executor-error stopping threshold (default 5, scoped to
+# this tool only — config/guardrails.yaml's shared default of 3 is never
+# touched); see BUILD_LOG.md for why this tool specifically tolerates
+# more sporadic real-API failures than a production run does.
 guardrail-proof:
-	$(PY) -m scripts.guardrail_proof --n $(N) $(if $(DRY_RUN_FIRST),--dry-run-first)
+	$(PY) -m scripts.guardrail_proof --n $(N) $(if $(DRY_RUN_FIRST),--dry-run-first) \
+		$(if $(TOLERANCE),--consecutive-error-tolerance $(TOLERANCE))
+
+# RUN_ID=x uses webhooks (default); add POLL=1 to use polling instead — the
+# demo's insurance policy when the cloudflared tunnel or webhook server is
+# down. Prints which mode is active as the first line, then every
+# attribution this pass resolved, then gross/fp/net.
+watch:
+	$(PY) -m scripts.watch --run-id $(RUN_ID) $(if $(POLL),--poll)

@@ -49,7 +49,11 @@ from src.db.repo import (
     insert_webhook_event,
 )
 from src.errors import SchemaDriftError
-from src.ingest.normalize import extract_payment_id, normalize_payment_failed
+from src.ingest.normalize import (
+    extract_payment_id,
+    extract_terminal_event_fields,
+    normalize_payment_failed,
+)
 from src.logging_setup import get_logger
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -106,7 +110,7 @@ class IngestService:
 
         if event_type in TERMINAL_EVENT_TYPES:
             return self._handle_terminal_event(
-                event_id, event_type, payment_id, raw_body_hash, received_at
+                event_id, event_type, payload, payment_id, raw_body_hash, received_at
             )
 
         insert_webhook_event(
@@ -266,10 +270,21 @@ class IngestService:
         self,
         event_id: str,
         event_type: str,
+        payload: dict,
         payment_id: str | None,
         raw_body_hash: str,
         received_at: str,
     ) -> IngestResult:
+        # A terminal event's payment_id (via extract_payment_id) refers to
+        # whatever payment satisfied it. For payment_link.paid that is a
+        # brand-new payment created against our recovery link, not the
+        # original failed payment_id the episode was opened under — so
+        # "existing" here is only used to decide out_of_order vs. new for
+        # the dedup boundary. Actual outcome correlation for attribution
+        # (src/attribute/rules.py) matches on plink_id/order_id, both
+        # captured below regardless of whether an episode with this exact
+        # payment_id happens to exist.
+        fields = extract_terminal_event_fields(payload)
         existing = get_episode_by_payment_id(self._conn, payment_id) if payment_id else None
 
         if existing is None:
@@ -278,7 +293,9 @@ class IngestService:
                 event_id=event_id,
                 event_type=event_type,
                 payment_id=payment_id,
-                plink_id=None,
+                plink_id=fields.plink_id,
+                order_id=fields.order_id,
+                amount_paise=fields.amount_paise,
                 raw_body_hash=raw_body_hash,
                 signature_valid=True,
                 received_at=received_at,
@@ -304,7 +321,9 @@ class IngestService:
             event_id=event_id,
             event_type=event_type,
             payment_id=payment_id,
-            plink_id=None,
+            plink_id=fields.plink_id,
+            order_id=fields.order_id,
+            amount_paise=fields.amount_paise,
             raw_body_hash=raw_body_hash,
             signature_valid=True,
             received_at=received_at,

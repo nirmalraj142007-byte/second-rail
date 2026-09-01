@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
+from ulid import ULID
+
 from src.db.repo import insert_execution
 from src.errors import ExecutorError, IdempotencyCollision
 from src.execute.idempotency import idempotency_key, reference_id
@@ -208,21 +210,36 @@ class RazorpayExecutor:
                     episode.payment_id,
                     e.last_response_body,
                 )
-                self._record_execution(
-                    conn=self._conn,
-                    episode_id=episode.episode_id,
-                    payment_id=episode.payment_id,
-                    idempotency_key=key,
-                    reference_id=ref_id,
-                    status="duplicate_suppressed",
-                    response_code=400,
-                    plink_id=None,
-                    short_url=None,
-                    request_body_hash=hashlib.sha256(str(payload).encode()).hexdigest(),
-                    attempt=len(attempts),
-                    delay_ms=int((attempts[-1]["delay_s"] * 1000) if attempts else 0),
-                    run_id=run_id,
-                )
+                try:
+                    self._record_execution(
+                        conn=self._conn,
+                        episode_id=episode.episode_id,
+                        payment_id=episode.payment_id,
+                        idempotency_key=key,
+                        reference_id=ref_id,
+                        status="duplicate_suppressed",
+                        response_code=400,
+                        plink_id=None,
+                        short_url=None,
+                        request_body_hash=hashlib.sha256(str(payload).encode()).hexdigest(),
+                        attempt=len(attempts),
+                        delay_ms=int((attempts[-1]["delay_s"] * 1000) if attempts else 0),
+                        run_id=run_id,
+                    )
+                except IdempotencyCollision:
+                    # This exact key already has a row from an earlier
+                    # attempt (e.g. a caller re-submitting the same episode
+                    # list through this same executor a second time, as
+                    # scripts/guardrail_proof.py's idempotency-detection
+                    # pass does) — the server-side duplicate this branch
+                    # exists to record is already on file under this key,
+                    # so there is nothing new to persist, only nothing to
+                    # crash on either.
+                    logger.warning(
+                        "idempotency collision recording a server-side duplicate for "
+                        "payment_id=%s — already on file under this key",
+                        episode.payment_id,
+                    )
                 return ExecutionResult(
                     status="duplicate_suppressed",
                     idempotency_key=key,
@@ -230,28 +247,46 @@ class RazorpayExecutor:
                     response_code=400,
                 )
             logger.error(
-                "executor exhausted retries: payment_id=%s, last_status=%s",
+                "executor exhausted retries: payment_id=%s, last_status=%s, "
+                "last_response_body=%r",
                 episode.payment_id,
                 e.last_status_code,
+                e.last_response_body,
             )
-            self._record_execution(
-                conn=self._conn,
-                episode_id=episode.episode_id,
-                payment_id=episode.payment_id,
-                idempotency_key=key,
-                reference_id=ref_id,
-                status="failed",
-                response_code=e.last_status_code,
-                plink_id=None,
-                short_url=None,
-                request_body_hash=hashlib.sha256(str(payload).encode()).hexdigest(),
-                attempt=len(attempts),
-                delay_ms=int((attempts[-1]["delay_s"] * 1000) if attempts else 0),
-                run_id=run_id,
-            )
+            try:
+                self._record_execution(
+                    conn=self._conn,
+                    episode_id=episode.episode_id,
+                    payment_id=episode.payment_id,
+                    idempotency_key=key,
+                    reference_id=ref_id,
+                    status="failed",
+                    response_code=e.last_status_code,
+                    plink_id=None,
+                    short_url=None,
+                    request_body_hash=hashlib.sha256(str(payload).encode()).hexdigest(),
+                    attempt=len(attempts),
+                    delay_ms=int((attempts[-1]["delay_s"] * 1000) if attempts else 0),
+                    run_id=run_id,
+                )
+            except IdempotencyCollision:
+                # A prior attempt under this same idempotency key (this run
+                # or an earlier one) already recorded created/failed/
+                # duplicate_suppressed — unlike the "created" success path
+                # above, which re-reads and returns the existing row, this
+                # attempt itself still genuinely failed and the caller
+                # (src/runner.py) needs to know that, so ExecutorError is
+                # still raised below; only the redundant duplicate insert
+                # is what this catches.
+                logger.warning(
+                    "idempotency collision recording a second failed attempt for "
+                    "payment_id=%s — a prior attempt under the same key is already "
+                    "on file; this attempt still failed and is still reported as such",
+                    episode.payment_id,
+                )
             raise ExecutorError(
                 f"failed to create Payment Link for {episode.payment_id}: "
-                f"HTTP {e.last_status_code}",
+                f"HTTP {e.last_status_code} — body: {e.last_response_body!r}",
                 code="PAYMENT_LINK_CREATION_FAILED",
             ) from e
 
@@ -381,8 +416,6 @@ class RazorpayExecutor:
         expected control-flow path for a racing duplicate create — so this
         method does not duplicate that translation.
         """
-        from ulid import ULID
-
         insert_execution(
             conn,
             execution_id=str(ULID()),
@@ -410,10 +443,21 @@ class FixtureExecutor:
     synthesizes a deterministic `plink_id` from the episode's own
     idempotency key so the same episode always replays the same fixture
     response without ever touching the network.
+
+    `conn` is optional (defaults to `None`, matching every existing call
+    site — `scripts/guardrail_proof.py --dry-run-first` and
+    `tests/test_executor.py` construct this with no connection at all,
+    since they only ever check the returned `ExecutionResult`). When
+    supplied, every "created" result is also persisted via
+    `insert_execution()`, exactly like `RazorpayExecutor` — without this, a
+    caller that reads the `execution` table afterward (e.g.
+    `scripts/eval.py`'s false-positive cost check, which is DB-driven) would
+    silently see zero rows despite the run having "actioned" episodes.
     """
 
-    def __init__(self, fixture_dir: Path) -> None:
+    def __init__(self, fixture_dir: Path, conn: sqlite3.Connection | None = None) -> None:
         self._fixture_dir = fixture_dir
+        self._conn = conn
         self._created: dict[str, str] = {}  # idempotency_key -> plink_id
 
     def create_recovery_link(
@@ -445,6 +489,32 @@ class FixtureExecutor:
             short_url = f"https://rzp.io/fixture/{key[:16]}"
 
         self._created[key] = plink_id
+
+        if self._conn is not None:
+            try:
+                insert_execution(
+                    self._conn,
+                    execution_id=str(ULID()),
+                    episode_id=episode.episode_id,
+                    idempotency_key=key,
+                    reference_id=reference_id(key),
+                    api="payment_links",
+                    plink_id=plink_id,
+                    short_url=short_url,
+                    request_body_hash=hashlib.sha256(key.encode()).hexdigest(),
+                    response_code=200,
+                    attempt=0,
+                    delay_ms=0,
+                    status="created",
+                    run_id=run_id,
+                    created_at=datetime.now(IST).isoformat(timespec="seconds"),
+                )
+            except IdempotencyCollision:
+                logger.warning(
+                    "fixture idempotency collision (DB already has this key): payment_id=%s",
+                    episode.payment_id,
+                )
+
         return ExecutionResult(
             status="created",
             idempotency_key=key,

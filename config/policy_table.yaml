@@ -38,6 +38,17 @@ actions:
   - id: open_ticket
   - id: no_action
 
+# src/choose/selector.py's deterministic fallback when the LLM is
+# unreachable (not when it chooses badly — a bad choice halts the run, see
+# AdmissibilityError). First entry present in the current episode's
+# admissible_actions wins. Ordered least- to most-conservative: prefer a
+# same-instrument nudge (cheapest, most direct), then a deferral (no
+# contact channel needed), then a ticket (costs a human's time), and only
+# fall all the way to no_action if nothing more specific is admissible —
+# no_action must always be last since it is the only entry guaranteed to
+# be in every admissible set.
+fallback_priority: [link_same_instrument, defer_2h, link_alt_instrument, open_ticket, no_action]
+
 rules:
   # C1 — insufficient_funds
   - policy_rule_id: P-01

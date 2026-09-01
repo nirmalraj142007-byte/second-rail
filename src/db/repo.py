@@ -14,9 +14,14 @@ those two paths.
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from typing import TYPE_CHECKING
 
 from src.errors import DuplicateEventError, IdempotencyCollision
+
+if TYPE_CHECKING:
+    from src.config_models import PolicyTable
 
 
 def insert_customer_if_absent(
@@ -191,18 +196,22 @@ def insert_webhook_event(
     received_at: str,
     processed: bool,
     dedup_result: str,
+    order_id: str | None = None,
+    amount_paise: int | None = None,
 ) -> None:
     try:
         conn.execute(
             """
             INSERT INTO webhook_event (
-                event_id, event_type, payment_id, plink_id, raw_body_hash,
-                signature_valid, received_at, processed, dedup_result
-            ) VALUES (?,?,?,?,?,?,?,?,?)
+                event_id, event_type, payment_id, plink_id, order_id,
+                amount_paise, raw_body_hash, signature_valid, received_at,
+                processed, dedup_result
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
-                event_id, event_type, payment_id, plink_id, raw_body_hash,
-                int(signature_valid), received_at, int(processed), dedup_result,
+                event_id, event_type, payment_id, plink_id, order_id,
+                amount_paise, raw_body_hash, int(signature_valid), received_at,
+                int(processed), dedup_result,
             ),
         )
         conn.commit()
@@ -239,6 +248,72 @@ def insert_gate_check(
         ) VALUES (?,?,?,?,?,?,?)
         """,
         (check_id, episode_id, check_name, result, reason, evaluated_at, order_index),
+    )
+    conn.commit()
+
+
+def upsert_policy_rules(conn: sqlite3.Connection, policy: PolicyTable) -> None:
+    """Mirror config/policy_table.yaml's rules (plus a synthetic
+    'default_rule' row for the catch-all) into the policy_rule table, so
+    decision.policy_rule_id's FK has something to point at. Config is the
+    source of truth — this is a queryable mirror, INSERT OR REPLACE'd fresh
+    on every run in case the config changed since the last one, the same
+    pattern load_and_upsert_customers() uses for data/customers.jsonl."""
+    for r in policy.rules:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO policy_rule (
+                policy_rule_id, cause_class, amount_band, segment, instrument,
+                admissible_actions, escalation_tier, justification
+            ) VALUES (?,?,?,?,?,?,?,?)
+            """,
+            (
+                r.policy_rule_id, r.cause_class, r.amount_band, r.segment, r.instrument,
+                json.dumps(r.admissible_actions), r.escalation_tier, r.justification,
+            ),
+        )
+    d = policy.default_rule
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO policy_rule (
+            policy_rule_id, cause_class, amount_band, segment, instrument,
+            admissible_actions, escalation_tier, justification
+        ) VALUES ('default_rule', NULL, NULL, NULL, NULL, ?, ?, ?)
+        """,
+        (json.dumps(d.admissible_actions), d.escalation_tier, d.justification),
+    )
+    conn.commit()
+
+
+def insert_decision(
+    conn: sqlite3.Connection,
+    *,
+    decision_id: str,
+    episode_id: str,
+    policy_rule_id: str,
+    candidate_actions: list[str],
+    chosen_action: str,
+    features_used: list[str],
+    inside_admissible_set: bool,
+    escalation_tier: str,
+    decided_at: str,
+) -> None:
+    """UNIQUE(episode_id) — one decision per episode, ever, mirroring
+    "one recovery attempt per payment_id" (config/guardrails.yaml:
+    max_actions_per_payment)."""
+    conn.execute(
+        """
+        INSERT INTO decision (
+            decision_id, episode_id, policy_rule_id, candidate_actions,
+            chosen_action, features_used, inside_admissible_set,
+            escalation_tier, decided_at
+        ) VALUES (?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            decision_id, episode_id, policy_rule_id, json.dumps(candidate_actions),
+            chosen_action, json.dumps(features_used), int(inside_admissible_set),
+            escalation_tier, decided_at,
+        ),
     )
     conn.commit()
 
@@ -308,6 +383,167 @@ def end_run(
         (ended_at, episode_count, stopped_reason, llm_cost_paise, throughput_epm, run_id),
     )
     conn.commit()
+
+
+def get_terminal_webhook_events(
+    conn: sqlite3.Connection,
+    *,
+    payment_id: str | None,
+    order_id: str | None,
+    plink_id: str | None,
+) -> list[sqlite3.Row]:
+    """Every terminal-event webhook_event row (payment.captured,
+    payment_link.paid, payment_link.expired) that could plausibly be the
+    outcome of a given execution: matched by plink_id, order_id, or
+    payment_id, in that preference order at the call site (this just
+    returns every candidate, sorted earliest-first — src/attribute/rules.py
+    decides which one actually counts and why)."""
+    clauses = []
+    params: list[str] = []
+    if plink_id:
+        clauses.append("plink_id = ?")
+        params.append(plink_id)
+    if order_id:
+        clauses.append("order_id = ?")
+        params.append(order_id)
+    if payment_id:
+        clauses.append("payment_id = ?")
+        params.append(payment_id)
+    if not clauses:
+        return []
+    where = " OR ".join(clauses)
+    rows = conn.execute(
+        f"""
+        SELECT * FROM webhook_event
+        WHERE event_type IN ('payment.captured','payment_link.paid','payment_link.expired')
+          AND ({where})
+        ORDER BY received_at ASC
+        """,
+        params,
+    ).fetchall()
+    return rows
+
+
+def get_executions_for_run(conn: sqlite3.Connection, run_id: str) -> list[sqlite3.Row]:
+    """Every execution this run actually created, joined to the episode data
+    attribution needs (payment_id, order_id, customer_id, the original
+    amount) — one row per link created, oldest first."""
+    return conn.execute(
+        """
+        SELECT ex.execution_id, ex.episode_id, ex.plink_id, ex.created_at,
+               ep.payment_id, ep.order_id, ep.customer_id, ep.amount_paise
+        FROM execution ex
+        JOIN episode ep ON ep.episode_id = ex.episode_id
+        WHERE ex.run_id = ? AND ex.status = 'created'
+        ORDER BY ex.created_at ASC
+        """,
+        (run_id,),
+    ).fetchall()
+
+
+def insert_attribution(
+    conn: sqlite3.Connection,
+    *,
+    attribution_id: str,
+    episode_id: str,
+    execution_id: str | None,
+    outcome: str,
+    reason_code: str,
+    recovered_amount_paise: int | None,
+    window_hours: int,
+    attributed_at: str,
+    attribution_rule_id: str,
+) -> None:
+    """INSERT OR REPLACE keyed on the UNIQUE(episode_id) constraint — a
+    re-run of the watcher for the same run replaces the prior verdict for
+    an episode rather than accumulating a second row."""
+    conn.execute(
+        """
+        INSERT INTO attribution (
+            attribution_id, episode_id, execution_id, outcome, reason_code,
+            recovered_amount_paise, window_hours, attributed_at, attribution_rule_id
+        ) VALUES (?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(episode_id) DO UPDATE SET
+            execution_id = excluded.execution_id,
+            outcome = excluded.outcome,
+            reason_code = excluded.reason_code,
+            recovered_amount_paise = excluded.recovered_amount_paise,
+            window_hours = excluded.window_hours,
+            attributed_at = excluded.attributed_at,
+            attribution_rule_id = excluded.attribution_rule_id
+        """,
+        (
+            attribution_id, episode_id, execution_id, outcome, reason_code,
+            recovered_amount_paise, window_hours, attributed_at, attribution_rule_id,
+        ),
+    )
+    conn.commit()
+
+
+def get_attributions_for_run(conn: sqlite3.Connection, run_id: str) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT a.* FROM attribution a
+        JOIN execution ex ON ex.execution_id = a.execution_id
+        WHERE ex.run_id = ?
+        """,
+        (run_id,),
+    ).fetchall()
+
+
+def insert_ledger_entry(
+    conn: sqlite3.Connection,
+    *,
+    entry_id: str,
+    run_id: str,
+    episode_id: str | None,
+    kind: str,
+    amount_paise: int,
+    basis: str | None,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO ledger_entry (entry_id, run_id, episode_id, kind, amount_paise, basis)
+        VALUES (?,?,?,?,?,?)
+        """,
+        (entry_id, run_id, episode_id, kind, amount_paise, basis),
+    )
+    conn.commit()
+
+
+def get_ledger_total(conn: sqlite3.Connection, run_id: str, kind: str) -> int:
+    row = conn.execute(
+        "SELECT COALESCE(SUM(amount_paise), 0) AS total FROM ledger_entry "
+        "WHERE run_id = ? AND kind = ?",
+        (run_id, kind),
+    ).fetchone()
+    return int(row["total"])
+
+
+def get_customer(conn: sqlite3.Connection, customer_id: str) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM customer WHERE customer_id = ?", (customer_id,)
+    ).fetchone()
+
+
+def count_prior_created_contacts(
+    conn: sqlite3.Connection, customer_id: str, *, before_iso: str, since_iso: str
+) -> int:
+    """How many 'created' executions this customer already had in
+    [since_iso, before_iso) — used by the false-positive frequency-cap
+    check, which must count contacts strictly before the one being judged
+    so a contact never counts against itself."""
+    row = conn.execute(
+        """
+        SELECT COUNT(*) AS n
+        FROM execution ex
+        JOIN episode ep ON ep.episode_id = ex.episode_id
+        WHERE ep.customer_id = ? AND ex.status = 'created'
+          AND ex.created_at >= ? AND ex.created_at < ?
+        """,
+        (customer_id, since_iso, before_iso),
+    ).fetchone()
+    return int(row["n"])
 
 
 def insert_audit_record(

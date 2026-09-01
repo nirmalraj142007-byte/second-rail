@@ -1,10 +1,16 @@
 """The batch orchestrator — the spine every later phase plugs into.
 
-`Runner.run()` takes four OPTIONAL collaborators (diagnoser, chooser,
-executor, attributor). With all four `None` — which is all that exists as
-of this phase — it performs gate-only processing: every episode is gated,
-nothing is diagnosed, chosen, executed, or attributed. Phases 8-12 inject
-the real implementations; this class does not get rebuilt when they land.
+`Runner.run()` takes five OPTIONAL collaborators (diagnoser, policy_engine,
+selector, executor, attributor). With all five `None` it performs gate-only
+processing: every episode is gated, nothing is diagnosed, chosen, executed,
+or attributed. Phases inject the real implementations incrementally; this
+class does not get rebuilt when they land — diagnoser was wired in without
+touching this docstring's shape, and policy_engine/selector (src/choose/)
+follow the same pattern: gate-eligible episodes are diagnosed and a policy
+match resolved only when all three of diagnoser, policy_engine, and
+selector are supplied together; with any of the three missing, an eligible
+episode still falls through to the pre-Phase-11 "placeholder_action"/"P-00"
+values passed to the executor, exactly as before this phase.
 
 `make gate-run` wires this module's CLI with `--gate-only`. The phase spec
 that requested this module names a single source, `data/train.jsonl`
@@ -38,20 +44,29 @@ import typer
 from pydantic import BaseModel
 from ulid import ULID
 
+from src.attribute.ledger import compute_fp_cost, parse_outcome_assumptions, post_gross, post_net
+from src.attribute.rules import ATTRIBUTION_RULE_ID
+from src.attribute.watcher import OutcomeWatcher
 from src.audit.writer import AuditWriter
+from src.choose.policy import PolicyEngine
+from src.choose.selector import ActionSelector
 from src.config import Settings, load_settings
 from src.config_models import ConfigBundle, Guardrails, config_hash, load_all
 from src.db.migrate import get_connection, migrate
 from src.db.repo import (
     end_run,
+    get_ledger_total,
     get_opted_out_customer_ids,
     insert_customer_if_absent,
+    insert_decision,
     insert_episode,
     insert_exception_entry,
     insert_gate_check,
     start_run,
+    upsert_policy_rules,
 )
-from src.errors import DuplicateEventError, ExecutorError
+from src.diagnose.classifier import Diagnoser
+from src.errors import AdmissibilityError, DuplicateEventError, ExecutorError
 from src.gate.checks import Episode, GateContext, RunState
 from src.gate.engine import GateDecision, GateEngine, cluster_sizes, compute_cluster_membership
 from src.gate.stopping import REASON_CLUSTER_ESCALATION, StoppingRules
@@ -73,6 +88,26 @@ class RunSummary(BaseModel):
     elapsed_s: float
     throughput_epm: float
     stopped_reason: str | None
+    # decisions inside the pre-registered admissible set / total decisions
+    # made this run. None when no decision was ever made (diagnoser,
+    # policy_engine, and selector not all wired in, or zero gate-eligible
+    # episodes) — never fabricated as 0.0 or 1.0 in that case. Every
+    # decision that is ever recorded is, by construction, inside the
+    # admissible set: ActionSelector.select() raises AdmissibilityError
+    # (which halts the run before a decision row is written) rather than
+    # ever returning a Selection with inside_admissible_set=False. See
+    # src/choose/selector.py's module docstring.
+    admissibility_rate: float | None = None
+    # Populated only when an attributor (OutcomeWatcher) was wired in —
+    # None means "attribution never ran this call", never a fabricated 0.
+    # A genuinely zero false-positive count after attribution *did* run is
+    # still reported as the integer 0, not None — see
+    # src/attribute/ledger.py's compute_fp_cost().
+    attribution_window_hours: int | None = None
+    attribution_rule_id: str | None = None
+    gross_paise: int | None = None
+    fp_cost_paise: int | None = None
+    net_paise: int | None = None
 
 
 @dataclass
@@ -128,17 +163,19 @@ class Runner:
         audit: AuditWriter,
         config: ConfigBundle,
         settings: Settings,
-        diagnoser: object | None = None,
-        chooser: object | None = None,
+        diagnoser: Diagnoser | None = None,
+        policy_engine: PolicyEngine | None = None,
+        selector: ActionSelector | None = None,
         executor: object | None = None,
-        attributor: object | None = None,
+        attributor: OutcomeWatcher | None = None,
     ) -> None:
         self._conn = conn
         self._audit = audit
         self._config = config
         self._settings = settings
         self._diagnoser = diagnoser
-        self._chooser = chooser
+        self._policy_engine = policy_engine
+        self._selector = selector
         self._executor = executor
         self._attributor = attributor
         self._gate = GateEngine()
@@ -184,6 +221,16 @@ class Runner:
         cluster_membership = compute_cluster_membership(episode_list, g.outage_cluster_threshold)
         cluster_size_by_key = cluster_sizes(cluster_membership)
         opted_out = get_opted_out_customer_ids(self._conn)
+
+        choose_enabled = (
+            self._diagnoser is not None
+            and self._policy_engine is not None
+            and self._selector is not None
+        )
+        if self._policy_engine is not None:
+            upsert_policy_rules(self._conn, self._policy_engine.table)
+        decisions_total = 0
+        decisions_inside_set = 0
 
         state = RunState()
         by_outcome: Counter[str] = Counter()
@@ -254,16 +301,113 @@ class Runner:
             )
 
             if decision.eligible:
-                # If an executor is wired in, call it; otherwise stay in pending
-                # (diagnose/choose land in later phases and will supply the
-                # real action + policy_rule_id in place of these placeholders).
-                if self._executor is not None:
+                action = "placeholder_action"
+                policy_rule_id = "P-00"
+                if choose_enabled:
+                    try:
+                        diagnosis = self._diagnoser.diagnose(episode)
+                        self._audit.append(
+                            stage="diagnose",
+                            actor="agent",
+                            episode_id=episode.episode_id,
+                            payment_id=episode.payment_id,
+                            rationale=diagnosis.rationale,
+                            features_used=diagnosis.features_used,
+                            llm=(
+                                {
+                                    "model": diagnosis.llm_model,
+                                    "prompt_hash": diagnosis.prompt_hash,
+                                    "confidence": diagnosis.confidence,
+                                }
+                                if diagnosis.method == "llm"
+                                else None
+                            ),
+                        )
+                        match = self._policy_engine.resolve(episode, diagnosis)
+                        selection = self._selector.select(episode, diagnosis, match, ctx=ctx)
+                    except AdmissibilityError as exc:
+                        self._audit.append(
+                            stage="stop",
+                            actor="system",
+                            episode_id=episode.episode_id,
+                            payment_id=episode.payment_id,
+                            rationale=f"admissibility violation: {exc}",
+                        )
+                        raise
+
+                    action = selection.chosen_action
+                    policy_rule_id = match.policy_rule_id
+                    decisions_total += 1
+                    if selection.inside_admissible_set:
+                        decisions_inside_set += 1
+                    insert_decision(
+                        self._conn,
+                        decision_id=str(ULID()),
+                        episode_id=episode.episode_id,
+                        policy_rule_id=match.policy_rule_id,
+                        candidate_actions=match.admissible_actions,
+                        chosen_action=selection.chosen_action,
+                        features_used=selection.features_used,
+                        inside_admissible_set=selection.inside_admissible_set,
+                        escalation_tier=match.escalation_tier,
+                        decided_at=_now_iso(),
+                    )
+                    self._audit.append(
+                        stage="choose",
+                        actor="agent",
+                        episode_id=episode.episode_id,
+                        payment_id=episode.payment_id,
+                        candidate_actions=match.admissible_actions,
+                        chosen_action=selection.chosen_action,
+                        policy_rule_id=match.policy_rule_id,
+                        features_used=selection.features_used,
+                        rationale=selection.rationale,
+                        escalation_tier=match.escalation_tier,
+                        llm=(
+                            {"model": selection.llm_model, "prompt_hash": selection.prompt_hash}
+                            if not selection.llm_degraded
+                            else None
+                        ),
+                    )
+
+                # "no_action" means the agent decided against contacting this
+                # episode at all — it must never reach the executor, or every
+                # no_action decision would silently create a real Payment
+                # Link anyway (action was accepted by create_recovery_link()
+                # but never actually inspected there). Recorded as
+                # suppressed, at the "choose" stage, distinct from a gate
+                # suppression — no episode is ever silently dropped either
+                # way (see the accounting invariant below).
+                if action == "no_action":
+                    by_outcome["suppressed"] += 1
+                    exception_count += 1
+                    insert_exception_entry(
+                        self._conn,
+                        exception_id=str(ULID()),
+                        run_id=run_id,
+                        episode_id=episode.episode_id,
+                        stage="choose",
+                        reason_code="no_action_selected",
+                        reason_text=(
+                            f"agent selected no_action under policy_rule_id={policy_rule_id!r}"
+                        ),
+                    )
+                    self._audit.append(
+                        stage="execute",
+                        actor="system",
+                        episode_id=episode.episode_id,
+                        payment_id=episode.payment_id,
+                        outcome="suppressed",
+                        rationale="chosen_action=no_action — no executor call made",
+                    )
+                # If an executor is wired in, call it; otherwise stay in pending.
+                elif self._executor is not None:
                     execution_outcome: str | None = None
                     try:
                         result = self._executor.create_recovery_link(
                             episode=episode,
-                            action="placeholder_action",
-                            policy_rule_id="P-00",
+                            action=action,
+                            policy_rule_id=policy_rule_id,
                             run_id=run_id,
                         )
                     except ExecutorError as e:
@@ -318,12 +462,25 @@ class Runner:
                 else:
                     by_outcome["pending"] += 1
 
-                state.exposure_committed_paise += episode.amount_paise
-                state.total_eligible_contacts_this_run += 1
-                if episode.customer_id:
-                    state.contacts_by_customer.setdefault(episode.customer_id, []).append(
-                        episode.failed_at
-                    )
+                # Exposure/contact accounting reflects real commitments only
+                # — a "no_action" episode never reaches the executor (see
+                # above) and must not count toward any of these three
+                # counters either, or the caps meant to bound REAL exposure
+                # end up bounding "episodes merely considered" instead. This
+                # used to be safe to run unconditionally because every
+                # gate-eligible episode DID become a real link before the
+                # no_action fix above existed; once no_action started being
+                # a genuine no-op, this accounting silently went stale
+                # rather than failing loudly — see BUILD_LOG.md for the
+                # investigation that caught it after `make eval` on the
+                # sealed split.
+                if action != "no_action":
+                    state.exposure_committed_paise += episode.amount_paise
+                    state.total_eligible_contacts_this_run += 1
+                    if episode.customer_id:
+                        state.contacts_by_customer.setdefault(episode.customer_id, []).append(
+                            episode.failed_at
+                        )
             else:
                 by_outcome["suppressed"] += 1
                 exception_count += 1
@@ -399,6 +556,33 @@ class Runner:
             f"pending({pending})"
         )
 
+        admissibility_rate = (
+            decisions_inside_set / decisions_total if decisions_total else None
+        )
+
+        attribution_fields: dict[str, object] = {}
+        if self._attributor is not None:
+            attributions = self._attributor.from_webhooks(self._conn, run_id)
+            for a in attributions:
+                post_gross(self._conn, run_id, a)
+                self._audit.append(
+                    stage="attribute",
+                    actor="system",
+                    episode_id=a.episode_id,
+                    outcome=a.outcome,
+                    rationale=f"{a.attribution_rule_id}: {a.reason_code}",
+                )
+            assumptions = parse_outcome_assumptions()
+            fp = compute_fp_cost(self._conn, run_id, assumptions)
+            net_paise = post_net(self._conn, run_id)
+            attribution_fields = dict(
+                attribution_window_hours=g.attribution_window_hours,
+                attribution_rule_id=ATTRIBUTION_RULE_ID,
+                gross_paise=get_ledger_total(self._conn, run_id, "gross_recovery"),
+                fp_cost_paise=fp.cost_paise,
+                net_paise=net_paise,
+            )
+
         return RunSummary(
             run_id=run_id,
             episode_count=episode_count,
@@ -408,6 +592,8 @@ class Runner:
             elapsed_s=elapsed,
             throughput_epm=throughput,
             stopped_reason=stopped_reason,
+            admissibility_rate=admissibility_rate,
+            **attribution_fields,
         )
 
     @staticmethod

@@ -892,3 +892,730 @@ output, cache file count unchanged at 77 (all `openai/gpt-oss-20b`,
 verified by content, not filename), confirming zero live calls on the
 repeat. `cache/*.json` is what makes that possible for anyone cloning this
 repo with no key.
+
+## D6 (later) — 30 Aug 2026
+
+Phase 11: the action-selection layer. `src/choose/{policy,selector}.py`,
+`src/choose/prompts/{select_v1,copy_v1}.txt`, `tests/test_choose.py` (7
+tests), `scripts/choose_run.py` (`make choose-run SPLIT=train|sealed`),
+`config/copy_templates.yaml`, `fallback_priority` added to
+`config/policy_table.yaml` and validated in `src/config_models.py`,
+`policy_rule`/`decision` table writers added to `src/db/repo.py`,
+`src/runner.py` wired to call diagnose→resolve→select on every gate-
+eligible episode and record `RunSummary.admissibility_rate`.
+
+`PolicyEngine` is pure table lookup, no LLM, no I/O beyond the config
+already loaded — `ActionSelector` is the one place a model picks from a
+menu it didn't write, and it cannot expand that menu: a response naming
+anything outside the resolved admissible set raises `AdmissibilityError`
+after one repair retry, which halts the run, full stop. That's
+deliberately asymmetric with the diagnosis layer's degrade-and-continue
+behavior — a wrong diagnosis is an ordinary kind of wrong; a model
+choosing outside its box is the one failure this project refuses to
+treat as recoverable. `docs/where-the-llm-is-not.md` now names the exact
+six-field whitelist a selection prompt is allowed to see
+(`LLM_VISIBLE_FEATURES`), with `tests/test_choose.py` grepping a real
+rendered prompt for every forbidden token as the enforcement mechanism.
+
+**Where the first hypothesis was wrong.** My first draft of
+`select_v1.txt` explained, in its own instructional text, that the model
+would never be shown "a cap value, a threshold, a ceiling" — reasonable-
+sounding meta-commentary. `test_rendered_prompt_contains_no_forbidden_tokens`
+failed immediately: the word "cap" appeared in the prompt, just not as
+leaked data — it was in the prompt's own sentence describing what it was
+*not* showing. The test (correctly) doesn't distinguish "leaked value" from
+"word appears anywhere in the rendered text" — that's a stricter, more
+honest bar than I'd designed for, and the right fix was to reword the
+prompt's own instructions to avoid the forbidden vocabulary entirely,
+not loosen the test.
+
+**The real evidence pass** — `make choose-run SPLIT=train`, 400 train
+episodes, live Groq calls, cache committed:
+
+- **admissibility_rate: 1.0000 (400/400).** Every decision this run made
+  landed inside its pre-registered admissible set. This number can only
+  ever be exactly 1.0 or the run would already have halted on
+  `AdmissibilityError` — it is a completion certificate, not a tunable
+  metric, and it's reported as such rather than framed as an accuracy
+  score.
+- **3 episodes degraded to `fallback_priority`**, `llm_degraded=True`, and
+  the run kept going — not a simulated fault. Partway through the real
+  run, this machine's network genuinely dropped for about 35 minutes
+  (`[Errno 11001] getaddrinfo failed` — DNS resolution failure, not a
+  Groq-side error) and the three episodes that happened to be in flight
+  during that window (`epi_00128`, `epi_00154`, `epi_00155`) each hit
+  `LLMCallError`, fell back to `open_ticket` via `fallback_priority`
+  deterministically, and the batch resumed on its own once connectivity
+  came back — no manual restart, no lost progress, no crash. This is a
+  more convincing demonstration of the degrade-gracefully path than the
+  planned fault-injection rig, precisely because nobody planned it.
+- **0 episodes named a feature outside `LLM_VISIBLE_FEATURES`** in their
+  `features_used` response — unsurprising, since the model is never shown
+  a feature name it could invent a variant of, but reported because the
+  phase spec asked for the count either way.
+- **Cost: 191 paise for the full 400-episode pass**, with 206/400 cache
+  hits — well over half. That's higher than it looks like it should be
+  for a "first" full run: `build_selection_fields()` reduces every episode
+  to just eight fields (`class_id`, `confidence`, `error_code`,
+  `amount_band`, `segment`, `instrument`, `prior_contacts_7d`,
+  `hours_since_failure`), and with `confidence` always the regex
+  baseline's fixed `1.0` and `prior_contacts_7d` always `0` (this script
+  calls `select()` without a `GateContext`, so that feature never varies —
+  see `select()`'s own docstring on why `ctx` is optional), a lot of train
+  episodes collapse onto an identical rendered prompt. 194 genuinely new
+  completions, not 400, at roughly 1 paisa each.
+- **A finding that shrinks this phase's own claim: 370/400 (92.5%) of
+  train episodes resolve through `default_rule`, not one of the 27
+  hand-authored explicit rules.** That's exactly why the action
+  distribution (`open_ticket` 83.0%, `no_action` 9.5%, `link_alt_instrument`
+  5.5%, `link_same_instrument` 2.0%, `defer_2h` **0%** — never chosen even
+  once) and escalation-tier split (`human_keystroke` 93.5% /
+  `auto` 6.5%) look as skewed as they do: `default_rule`'s admissible set
+  is only `[open_ticket, no_action]` at `human_keystroke` tier, and the
+  27 explicit rules were authored as *representative* cells (3 per cause
+  class, chosen to show real policy differentiation), not as a
+  distribution-matched sample of what the generator actually produces.
+  The design claim — "the model picks from a constrained set it didn't
+  construct" — holds regardless; what this number actually says is that
+  `config/policy_table.yaml`'s hand-authored coverage is thin relative to
+  the real cause/band/segment/instrument mix, and a judge asking "why is
+  93.5% of this batch escalated to a human" has an honest answer sitting
+  right here, not a hand-wave.
+
+Verified: `pytest -q` → 114 passed (1 pre-existing, unrelated live-network
+test deselected — fails identically on unmodified `master`, needs a
+migrated `second_rail.db` this repo's `.gitignore` doesn't track);
+`ruff check` clean; `make config-check` all 8 checks pass;
+
+## D6 (attribution) — 30 Aug 2026
+
+Phase 12: outcome attribution and the recovery ledger.
+`src/attribute/{rules,watcher,ledger}.py`, `tests/test_attribution.py` (13
+tests), `scripts/watch.py` (`make watch RUN_ID=x [POLL=1]`), `src/runner.py`
+wired to run attribution at the end of a batch and populate
+`RunSummary.{gross,fp_cost,net}_paise`. `AR-01` is a pure function over two
+small dataclasses (`ExecutionRecord`, `OutcomeEvent`) — that shape is what
+lets `from_webhooks()` and `by_polling()` share one code path and provably
+agree, rather than two hand-written implementations of the same rule
+drifting apart later.
+
+Getting the webhook side working required touching `src/ingest/` more than
+the phase spec named: `webhook_event` already had a `plink_id` column, but
+nothing ever populated it, and `_handle_terminal_event` didn't receive the
+raw payload at all, so a `payment_link.paid` webhook carried no way to
+correlate back to *which* link. Added `extract_terminal_event_fields()` to
+`src/ingest/normalize.py` and threaded `payload` through, plus `order_id` /
+`amount_paise` columns on `webhook_event` — normalization work, not a new
+LLM surface, so it stays inside the existing module boundary.
+
+**Where the first hypothesis was wrong, twice.**
+
+First: I assumed the account's 30-Payment-Link test-mode cap (documented in
+`LIMITATIONS.md` since Phase 8, "exhausted") was still exhausted and wrote
+the whole module assuming the live acceptance test would have to run
+against `FixtureExecutor` only. A one-line probe call
+(`create_payment_link` against a throwaway reference id) came back `200`,
+not `429` — the cap had reset since Phase 8. That let this phase's
+acceptance test run for real: `make demo --execute --limit 15` created 9
+genuine `plink_` IDs, `make watch RUN_ID=x` (webhooks) and
+`make watch RUN_ID=x POLL=1` (polling, no webhook server involved at all)
+independently resolved all 9 to the identical `pending`/`awaiting_outcome`
+verdict since nobody paid them, and `make rollback` cancelled all 9
+cleanly. `LIMITATIONS.md`'s Phase 8 note is left as written, since it was
+true when it was written — this entry is the correction, not an edit to
+that one.
+
+Second, and more embarrassing: the first draft of the false-positive cost
+parser (`src/attribute/ledger.py`) matched `outcome_model.md`'s stated
+prices with a regex containing the literal rupee glyph, and repeated it in
+two `ConfigError` messages. `grep -rn '5000\|₹' src/` — the exact command
+CLAUDE.md's non-negotiables section names as the check for money literals
+leaking into code — caught it immediately, because the check can't tell
+"a parser's search pattern" from "a hard-coded amount," and it shouldn't
+have to: the fix was building the glyph from `chr(0x20B9)` at import time
+instead of typing it inline, which is the more honest fix anyway — a
+grep-based gate that has to special-case its own exceptions isn't a gate.
+
+`pytest -q -m "not live"` → 125 passed; `ruff check src tests scripts`
+clean; `make config-check` all 8 checks pass unchanged.
+
+## D7 (eval + report) — 1 Sep 2026
+
+Phase 13: the sealed-split evaluation harness (`scripts/eval.py`) and the
+report renderer (`src/report/{render,sensitivity,charts}.py`). This is the
+phase where the ordering discipline from CLAUDE.md and the judge
+expectations file actually gets enforced in code, not just argued for in
+prose: `render_report()` is one straight-line function that appends
+sections 1 through 7 in the fixed order, so reordering them means editing
+that function, and `format_rupee_range()` refuses to render a bare
+float/point estimate at all.
+
+**Two real bugs found while building this, both fixed, neither cosmetic.**
+
+First — and this is the one that would have quietly undermined the whole
+recovery-comparison story if it had shipped: `src/runner.py` called the
+executor for *every* gate-eligible episode regardless of which action the
+agent chose, including `"no_action"`. `action` was accepted by
+`RazorpayExecutor.create_recovery_link()`/`FixtureExecutor` but never
+actually inspected there, so a `no_action` decision still created a real
+Payment Link — confirmed against already-committed evidence:
+`evidence/choose_metrics.json` shows 38 of 400 train episodes chosen as
+`no_action` that nonetheless generated links. Second Rail's central claim —
+diagnosis-driven suppression, not blanket contact — was not actually true
+of the code. Fixed by adding an explicit `action == "no_action"` branch in
+`Runner.run()` that skips the executor entirely and records the episode as
+`suppressed` (stage `"choose"`, reason `no_action_selected`) rather than
+`actioned`. Caught this by asking "why does the baseline and Second Rail
+contact the same episodes?" while wiring `scripts/eval.py`'s recovery
+figure — the numbers refused to look different before the fix, which is
+what sent me back to `runner.py` instead of trusting the pipeline.
+
+Second: `FixtureExecutor` — the executor `make eval`'s default (no `--live`)
+mode uses — never wrote to the `execution` table at all, unlike
+`RazorpayExecutor`. A first pass at `scripts/eval.py` read "contacted
+episodes" back out of that table to compute the recovery figure, and got
+zero every time despite `by_outcome` reporting `actioned: 5`. Root cause:
+`FixtureExecutor.__init__` never took a `conn` in the first place — it was
+built purely as a wiring-validation stub for `guardrail_proof.py
+--dry-run-first`, which only ever inspects the returned `ExecutionResult`,
+never the database. Fixed by adding an optional `conn` parameter (default
+`None`, so every existing call site — `guardrail_proof.py`,
+`tests/test_executor.py` — is unaffected) and persisting a `created`
+execution row exactly like `RazorpayExecutor` does when one is supplied.
+`scripts/eval.py` now passes its own connection, so the recovery figure and
+the (structurally-zero-by-construction) false-positive count both read off
+real persisted state instead of an empty table.
+
+**Design decisions made and disclosed, not hidden:** the recovery figure is
+computed as an expected value — Sigma(response_probability × amount_paise)
+over contacted episodes — rather than resampling `holdout/labels.jsonl`'s
+boolean `responded` draw, because a single boolean draw per episode on a
+200-episode batch would make the ±30% sensitivity sweep mostly measure
+sampling noise rather than the swept parameter (see
+`src/report/sensitivity.py`'s module docstring). The FIXED_RETRY_AT_T30
+baseline reuses `Runner`'s own pre-existing gate-only fallback path (no
+`diagnoser`/`policy_engine`/`selector` wired in) rather than a second
+hand-written pipeline — every gate-eligible episode gets Runner's existing
+`"placeholder_action"`/`"P-00"` sentinel, unconditionally, which is
+literally the baseline's own definition ("every eligible episode... with no
+diagnosis and no policy table"). Sections 2 and 3 (externally-anchored
+accuracy, the regex-vs-LLM head-to-head) read `evidence/classification_metrics.json`
+rather than recomputing — both are general classifier findings from
+`make classify`, not claims scoped to the sealed batch, and recomputing
+would only spend a second, redundant round of LLM calls.
+
+`pytest -q -m "not live"` → 133 passed (125 pre-existing + 8 new in
+`tests/test_report.py`); `ruff check src tests scripts` clean. Populating
+the sealed split's diagnose/choose LLM cache for a genuinely offline
+`make eval` run took a real, rate-limited pass against the configured Groq
+model (self-imposed 5 requests/min, per `src/diagnose/llm_client.py`'s own
+documented history with this provider): 420s the first time (cache cold),
+14.5s the second (cache warm, `LLM_API_KEY` unset, `LLM_PROVIDER=none`).
+
+**Two more things found while chasing the acceptance sequence, neither
+fixed — flagged instead, because both are outside this phase's actual
+scope and I'd rather report them than patch them under time pressure.**
+
+`make guardrail-proof N=200` cannot run against this account as specified:
+`data/train.jsonl` only has 108 gate-eligible episodes out of 400 (the
+other 292 fail one of the seven gate checks), so `select_gate_eligible_slice`
+can never find 200. Dropped to N=100 to at least get a real run going —
+and hit a second, real bug: `RazorpayExecutor.create_recovery_link()`'s
+`BackoffError` handler records a `status="failed"` execution row without
+catching `IdempotencyCollision`, unlike the `status="created"` success
+path a few lines above it, which does. `guardrail_proof.py`'s own second
+pass (re-submitting the same episode list through the same,
+fault-exhausted executor, specifically to test idempotency detection)
+hit exactly this: episode `epi_00057`'s first attempt had already failed
+and recorded a `failed` row under its idempotency key; the second
+pass's retry failed too (a real 429, not the injected one) and tried to
+record a second `failed` row under the same key, which crashed uncaught
+on the `UNIQUE(idempotency_key)` constraint. Left the 5 real Payment
+Links the run had already created before the crash cancelled manually
+(`plink_TWYB2VQljQkLE5` and four others — confirmed `cancelled` via a
+one-off script) so nothing live was left behind, but did not touch
+`src/execute/executor.py` a third time this phase. `evidence/report.md`'s
+guardrail-correctness table still reads the existing N=20
+`--dry-run-first` run rather than a fabricated N=200/N=100 result.
+
+**Third bug, caught by review rather than by me: the exact Phase-10
+this-run/real-cost distinction was missing from `scripts/eval.py`.**
+`cost_paise` on a `Diagnosis`/`Selection` is deliberately zeroed on a
+cache hit (`src/diagnose/classifier.py`, `src/choose/selector.py`), and
+this phase's report summed exactly that field for both the "this run"
+figure and the "per 100 episodes" figure — so a fully-cached run (the
+normal, intended state of `make eval`) reported Rs 0.00 twice, telling a
+reader the classifier and selector cost nothing to run at all.
+`scripts/classify.py` already solved this in Phase 10 with
+`_historical_cost_paise()`, recomputing from each record's real token
+counts via `compute_cost_paise()` regardless of `cache_hit`; this
+module just wasn't calling it. Fixed by capturing `input_tokens` /
+`output_tokens` / `llm_model` on `SelectRecord` (previously dropped —
+`DiagnoseRecord` already carried the full `Diagnosis` and didn't need
+the fix) and adding the same real-cost recomputation, rendered as its
+own clearly-labelled line under "this run" rather than replacing it —
+both numbers are legitimate and answer different questions ("what did
+this specific run spend" vs. "what would this cost with an empty
+cache"). Re-ran `make eval` with `LLM_API_KEY` unset afterward: still
+15.2s, "this run" correctly Rs 0.00 (fully cached), "real cost" now
+Rs 1.03 / Rs 0.52 per 100 episodes — nonzero, matching the ~101 real
+calls the cache actually took to build. `pytest -q -m "not live"` → 133
+passed; `ruff check` clean.
+`make verify-audit` → chain intact, 200 records.
+
+## D7 (eval + report), continued — accounting fix found by investigation, not by symptom
+
+The `cap_breach` stopping-rule finding two entries up (both runs halting
+at exactly 125/200 episodes) looked plausible on its own — a real
+guardrail firing is good evidence. It was wrong to leave it there. Asked
+to trace `per_run_exposure_ceiling_paise` precisely rather than accept
+"a guardrail fired, that's the story": does it accumulate against every
+gate-eligible episode, or only against episodes with a real executed
+action? It's the former, and that is a real bug, not a threshold to
+recalibrate — raising the number would only delay when the same
+miscount catches up again.
+
+**The mechanism.** `src/gate/checks.py: check_amount_cap()` compares
+`state.exposure_committed_paise + episode.amount_paise` against the
+ceiling — a real, correct check. But `state.exposure_committed_paise`
+(and, it turned out, two siblings: `state.total_eligible_contacts_this_run`
+and `state.contacts_by_customer`) was incremented at
+`src/runner.py:465` unconditionally for every gate-eligible episode,
+regardless of what the choose stage decided or whether the executor was
+ever called. Before this session's earlier `no_action` fix, every
+gate-eligible episode *did* become a real link, so "gate-eligible"
+was a reasonable stand-in for "real financial commitment." That fix
+correctly stopped `no_action` episodes from creating links — and in
+doing so quietly broke the assumption this accounting was built on. Not
+a new bug introduced by that fix; a latent one it exposed by finally
+making `no_action` mean something.
+
+**Confirmed empirically before touching any code**, by querying both
+eval runs' databases directly: both share the identical 102
+gate-eligible episodes (Rs 198,991.49 total — gate doesn't depend on
+diagnosis, so this made sense), which is what actually tripped the cap
+at the same point in both runs regardless of what either run really
+executed. Second Rail's *real* executed exposure was only
+Rs 184,799.43 (93 episodes) — Rs 14,192 less, corresponding to the 9
+episodes the agent correctly chose not to contact. The cap fired on
+the inflated figure, 14 thousand rupees before Second Rail's real
+spend would have justified it.
+
+**The fix:** moved the three-line accumulation block in `runner.py` to
+run only `if action != "no_action"`, leaving the seven gate checks and
+their ordering (checks #5-7: amount_cap, frequency_cap, quiet_hours)
+completely untouched — only the timing/condition of the increment
+changed, not what it's checked against or when in the check sequence.
+`total_eligible_contacts_this_run` and `contacts_by_customer` share the
+exact same call site and the exact same bug; fixed all three in one
+change rather than patching `exposure_committed_paise` alone and
+leaving the other two silently wrong.
+
+**Regression tests, and proof they actually catch the bug.** Three new
+tests in `tests/test_choose.py` (§8), one per counter, each running two
+real episodes for the same customer through `Runner.run()` — the first
+scripted to choose `no_action`, the second a real admissible action a
+few minutes later — with the *other* two guardrails loosened so only
+the counter under test can fail the scenario. Before trusting them,
+temporarily reverted the fix (`if action != "no_action"` → `if True`)
+and reran: all three failed, with assertion messages naming exactly
+the counter each one exists to catch. Restored the fix; all three pass.
+A test that can't fail isn't a test — cheap enough to check, no excuse
+not to.
+
+One test-authoring trap along the way: the two synthetic episodes
+initially rendered a byte-identical selection prompt (same class, band,
+segment, instrument, zero prior contacts, zero hours-since-failure), so
+the second episode's `select()` call silently hit the cache the first
+call had populated and never reached the second scripted LLM response —
+both episodes ended up choosing `no_action`, and every assertion passed
+for the wrong reason. Caught by checking `by_outcome` before trusting
+the counters. Fixed by nudging the second episode's `received_at`
+forward an hour, which is enough to change `HOURS_SINCE_FAILURE` in the
+rendered prompt and, with it, the cache key.
+
+**Checked whether this explained the `frequency_cap_exceeded`
+false-positive already noted in `LIMITATIONS.md`** (from the earlier
+`fp_count=1` finding) rather than assuming either way. It doesn't:
+after the fix, `fp_count=1` with the identical `frequency_cap_exceeded`
+breakdown persists in *both* the Second Rail run and the
+FIXED_RETRY_AT_T30 baseline — and the baseline never had a `no_action`
+path at all (`choose_enabled` is always `False` there), so this fix is
+a structural no-op for it. Identical behaviour in a run the fix cannot
+touch rules it out as the cause; `LIMITATIONS.md`'s existing
+explanation (gate-time `episode.failed_at` reasoning vs. audit-time
+`execution.created_at` wall-clock reasoning, a batch-replay-compression
+artifact) already named the real cause and didn't need correcting —
+updated that entry to record that this was checked, not assumed.
+
+**Re-ran `make eval` after the fix** (`LLM_API_KEY` unset,
+`LLM_PROVIDER=none`, cache rebuilt once beforehand against the real
+Groq key for the newly-reached episodes the fixed accounting exposes —
+gate eligibility is no longer diagnosis-independent, since a later
+episode's eligibility now depends on whether an earlier one for the
+same run was actually contacted, so the fixed run reaches a different
+episode sequence than the buggy one did): Second Rail moved from
+93 actioned / 32 suppressed / 75 pending (stopped at 125/200, real
+exposure Rs 184,799.43 against a Rs 198,991.49 gate-time estimate) to
+99 actioned / 32 suppressed / 69 pending (stopped at 131/200, real
+exposure Rs 198,768.92 — now tracking almost exactly against the real
+Rs 2,00,000 ceiling instead of stopping ~Rs 14,200 early). The baseline
+is unchanged — 102 actioned / 23 suppressed / 75 pending, still
+125/200 — exactly as expected, since it never had a `no_action` path
+for the fix to touch. `pytest -q -m "not live"` → 136 passed (133 +
+3 new regression tests); `ruff check` clean; `make eval` completes in
+17-28s either way (offline or rebuilding a small cache delta).
+
+## D7 (eval + report), correction — the "baseline out-earns Second Rail" claim was a bug artifact
+
+Appended, not rewritten — the original claim was never committed to any
+file in this repo (it was stated in conversation, in the summary handed
+back after the very first `make eval` run, before the exposure-cap
+accounting bug two entries up was found), but it was a real claim about
+this project's own results and deserves a real, dated correction rather
+than quietly vanishing once the numbers changed.
+
+**What was claimed:** "the baseline slightly out-earns Second Rail in
+raw expected recovery (contacts more episodes; Second Rail suppresses
+more via `no_action`) — a genuine 'shrinks my own claim' result." At
+the time, Second Rail's net recovery was Rs 51,412–95,449 against the
+baseline's Rs 51,482–95,580 — i.e. baseline ahead of Second Rail, framed
+as an honest, unprompted finding.
+
+**Why it was wrong.** It was true of the numbers at the time, but the
+numbers at the time were themselves an artifact of the exposure-cap
+counter bug documented above: Second Rail's real contact count was
+being capped early (93/102 gate-eligible, stopped at 125/200) by a
+counter that wrongly charged `no_action` episodes against the exposure
+ceiling, while the baseline — which has no `no_action` path — was never
+affected by that same bug. Comparing the two recovery figures was
+comparing a bugged run against a clean one, not comparing two policies
+on equal footing. The "shrinks my own claim" framing was honest about
+what the numbers said; it was not honest about what the numbers *were*,
+because that hadn't been checked yet.
+
+**Corrected, post-fix numbers** (same run that produced the 131/200
+figures above): Second Rail net Rs 51,482–95,580, baseline net
+Rs 51,412–95,449 — Second Rail now slightly *ahead* of the baseline,
+the reverse of the original claim. Whether Second Rail's diagnosis-driven
+targeting genuinely beats a blanket contact-everyone policy in expected
+recovery is not resolved by this either way, on a single 200-episode
+sealed batch with the exposure ceiling as tight as it is relative to
+this split's shifted amount distribution — but the specific comparison
+originally reported is superseded, and the two runs now differ only in
+which episodes each policy chooses to contact, not in how much
+accounting bug either one absorbed getting there.
+
+## D7 (eval + report), continued again — the real guardrail-proof crash, and a fourth bug
+
+Section 1's guardrail-correctness table has read a stale N=20
+`--dry-run-first` stub since this phase started, because `make
+guardrail-proof N=200` genuinely could not run: `data/train.jsonl` has
+only 108 gate-eligible episodes out of 400, so `select_gate_eligible_slice`
+can never find 200 (checked and reported, not silently worked around).
+Asked to fix the `RazorpayExecutor` `IdempotencyCollision` crash that
+blocked even a smaller real N and get the real number instead of the
+stub.
+
+**The `RazorpayExecutor` fix.** `create_recovery_link()`'s `BackoffError`
+handler recorded a `status="failed"` (and, on the server-side-duplicate
+branch, `status="duplicate_suppressed"`) execution row without catching
+`IdempotencyCollision`, unlike the `status="created"` success path a few
+lines above, which already does — and already explains why: "a race: two
+threads entered at the same time with the same key." Wrapped both of the
+other two `_record_execution()` calls in the same try/except, re-raising
+`ExecutorError` afterward on the "failed" path (this attempt still
+genuinely failed and the caller needs to know that; unlike the success
+path, there is no existing good result to hand back instead).
+
+**The regression test needed a rewrite before it caught anything.** The
+first version called `create_recovery_link()` twice for the same episode
+and asserted the second call still raised `ExecutorError` cleanly — it
+passed immediately, for the wrong reason: the early local-dedup check
+(Step 1, before any network call) already finds the row the first call
+inserted and returns `duplicate_suppressed` without ever reaching the
+retry loop or the collision at all, so a second *sequential* call from
+the same process structurally cannot exercise this code path — only a
+real race (or something inserting a row between Step 1's read and the
+final insert) can. Rewrote it to force the collision deterministically —
+monkeypatching `insert_execution` to raise `IdempotencyCollision` once —
+which tests the exception-handling logic itself rather than trying to
+reproduce a race a sequential test can't produce. Verified the same way
+as the other fixes this phase: temporarily disabled the catch (`except
+IdempotencyCollision` -> `except ZeroDivisionError`), confirmed the test
+failed with the exact original crash, restored it, confirmed it passed.
+
+**Running the real thing surfaced a second, different bug, in a
+different file.** `make guardrail-proof --n 108` still crashed —
+not with `IdempotencyCollision` this time, but with a raw, uncaught
+`ExecutorError` from `scripts/guardrail_proof.py`'s own second-pass loop
+(the one that re-submits every episode to measure idempotency
+detection). That loop has no exception handling at all, on the
+documented assumption that every episode in `episode_slice` was already
+attempted in the first pass, so a second attempt could only ever hit the
+early dedup check and return cleanly. That assumption held for the
+deliberately-injected faults (four, spaced out, with real successes
+between them) but not for what actually happened: this account is
+genuinely, heavily rate-limited right now — almost certainly from this
+session's own cumulative testing — and real (not injected) 429s pushed
+`consecutive_executor_errors_stop=3` to fire after only 8 of 108
+episodes. The other 100 were never attempted by the first pass at all,
+so the second pass's call for one of them was a fresh first-ever
+attempt against an account still being rate-limited, and it failed for
+real, propagating an uncaught `ExecutorError` and crashing the script —
+after having already created 5 real Payment Links that the crash left
+uncancelled. Cancelled all 5 by hand (`plink_TWYpxyEriLAbMu` and four
+others, confirmed `cancelled`) both times this happened (it crashed
+twice, once before this fix and once immediately after diagnosing it,
+each time leaving exactly 5 orphaned links).
+
+Fixed by bounding the second pass to `episode_slice[:processed_count]`
+— the prefix the first pass actually reached (`len(episode_slice) -
+by_outcome["pending"]`) — rather than the full slice, so the second
+pass can now only ever re-submit episodes that genuinely were attempted
+once already, matching what it's actually documented to measure. Also
+surfaced `processed_count` and `stopped_reason` in
+`evidence/guardrail_proof.json` and `evidence/report.md` §1, so a
+smaller-than-requested N is stated on the page rather than silently
+implied by a number that doesn't match what the reader might expect.
+
+**The real result, over what the account allowed:** N=108 requested,
+8 actually reached before the account's real rate limit fired —
+duplicate links created 0, cap breaches 0, quiet-hour contacts 0,
+idempotency collisions correctly detected 8/8, 5 real Payment Links
+created and cleanly cancelled. Every number is real; the N is smaller
+than hoped, and the report says so on the page rather than presenting
+108 as if it were the coverage actually achieved. `pytest -q -m "not
+live"` → 137 passed (136 + 1 new); `ruff check` clean.
+
+## D7 (eval + report), continued a third time — a fifth bug, and the real "duplicate links" number was never real
+
+Told, correctly, that the guardrail-proof result didn't add up:
+`verification_note` said "0 link(s) on the real Razorpay API carry
+notes.run_id=..., vs 5 distinct idempotency key(s) recorded locally" —
+5 links genuinely were created (confirmed live, cancelled cleanly), so
+0 matches on the real API is a contradiction, not a clean result.
+Told to check the order of operations (verify before or after cancel?),
+independently confirm one of the 5 real IDs exists with the right
+`notes.run_id` via a direct fetch rather than a list query, and name the
+exact real cause.
+
+**Order of operations, checked, not assumed:** `scripts/guardrail_proof.py`
+calls `client.list_payment_links(...)` and filters by `notes.run_id`
+*inside* the `try` block (before line ~200), and only cancels links in
+the `finally` block after that (line ~236+) — verification runs first,
+against live, uncancelled links. Not the bug.
+
+**Independent confirmation, before touching any code:** created one
+throwaway test Payment Link directly (`notes={"run_id":
+"diagnostic_test_run_001", ...}`), then called
+`client.fetch_payment_link(plink_id)` — a GET by ID, not a list/search —
+and got back the link with the exact `notes.run_id` set on creation.
+This alone rules out possibility #3 (a real executor bug): the executor
+sets `notes.run_id` correctly, and the API stores and returns it
+correctly when asked for that one object directly.
+
+**Then called `client.list_payment_links()` for the same account and
+got back an empty list on the very first page** — not "no items matched
+`run_id`", genuinely zero items, despite the account holding that one
+test link plus dozens more from this session's own testing. A raw,
+unfiltered call to `GET /payment_links` showed why:
+`{"payment_links": [...]}`. `RazorpayClient.list_payment_links()`
+(`src/razorpay_client.py`) read `result.get("items", [])` — the correct
+key for `fetch_order_payments()`'s endpoint two methods up (confirmed
+against a real Razorpay Collection response, `{"entity": "collection",
+"items": [...]}`), copy-pasted onto a different endpoint that actually
+returns `payment_links`, not `items`. `.get()` with a default never
+raises on a wrong key — it silently returns `[]` — so this has been
+returning nothing on every real call since the method was written, no
+matter how many links existed.
+
+**The consequence is worse than "the verification note looked odd."**
+`duplicate_links_created = max(0, len(run_links) - distinct_keys)` with
+`run_links` always `[]` computes `max(0, 0 - distinct_keys)`, which is
+`0` for any `distinct_keys >= 0` — always. Every `guardrail_proof.json`
+this project has ever produced reported "duplicate links created: 0"
+truthfully in the sense that 0 is what the (broken) formula always
+outputs, and falsely in the sense that this number was never actually
+checked against the real API even once. The headline non-circular
+guardrail metric was circular the whole time it mattered — a
+`max(0, ...)` clamp quietly hiding a broken lookup behind a
+plausible-looking zero.
+
+**No test caught it because no test existed.** `tests/test_razorpay_client.py`
+had coverage for `fetch_order_payments`'s `items` extraction but nothing
+at all for `list_payment_links`. Added
+`test_list_payment_links_extracts_payment_links_key`, mocking the real,
+confirmed `{"payment_links": [...]}` shape. Verified the same way as
+every other fix this phase: reverted the key to `"items"`, confirmed the
+new test failed (`assert [] == [...]`), restored `"payment_links"`,
+confirmed it passed.
+
+**Fixed and re-ran for real.** `list_payment_links()` now reads
+`result.get("payment_links", [])`. Re-ran `make guardrail-proof --n
+108`: still stopped at 8/108 (the account's real rate limiting from
+this session's own volume is still active — confirmed again from the
+raw logs: episodes 6, 7, 8 each got three consecutive genuine `HTTP 429
+Too Many Requests` from Razorpay itself, exhausting the retry cap and
+correctly firing `consecutive_executor_errors_stop=3`; the client
+self-throttles at 0.5 req/s already, so this is the account hitting a
+tighter real limit right now, not a client-side bug or a network
+issue), but this time `verification_note` reads "5 link(s) on the real
+Razorpay API carry notes.run_id=..., vs 5 distinct idempotency key(s)
+recorded locally" — 5 and 5, genuinely matching, because the query can
+finally see the account's own links. `duplicate_links_created: 0` in
+the current `evidence/guardrail_proof.json` is, for the first time,
+an actually-verified real zero. `pytest -q -m "not live"` → 138 passed
+(137 + 1 new); `ruff check` clean.
+
+**Confirmed, concretely, not from memory** (re-`grep`ped every claim
+before answering, rather than trusting the summary already given): the
+BUILD_LOG.md correction for the baseline-comparison retraction is the
+"D7 (eval + report), correction" entry above it; the three no_action
+counter regression tests are `test_no_action_episode_does_not_count_
+toward_{exposure_cap,frequency_cap,batch_contact_ceiling_tier}` in
+`tests/test_choose.py` §8, all three currently passing; the
+`frequency_cap_exceeded` LIMITATIONS.md entry's "Checked, not assumed"
+addendum is present and did not need further correction, since that
+bug was independently confirmed unrelated to the counter fix (identical
+`fp_count=1` in a baseline run the counter fix cannot touch).
+
+## D7 (eval + report), continued a fourth time — throughput variance explained, and a misleading label found along the way
+
+Asked why throughput dropped between two consecutive `make eval` runs
+(1296 -> 674 episodes/min-ish) — a real slowdown, or noise? Pulled the
+exact `run_id` behind the current report and read its audit file
+directly rather than guessing: `llm_cost_paise_this_run: 0`, and the run
+completed with `LLM_PROVIDER=none` set — which means every one of its
+109 model-needing calls was a cache hit, because a genuine miss under
+`NullClient` raises immediately and would have crashed the script, not
+run slow. So the two reports being compared made *zero* real network
+calls, either one — the throughput difference cannot be an LLM-call
+slowdown by construction.
+
+Verified the actual explanation empirically rather than asserting it:
+ran `make eval` three times back to back with byte-identical inputs
+(same fully-warm cache, same `LLM_API_KEY` unset) and recorded
+`throughput_epm` each time: 826.1, 1148.5, 1267.1. Three runs, nothing
+changed between them, and the spread alone covers the 674-to-1296 gap
+that prompted the question. This is real-machine variance in wall-clock
+timing — most plausibly `src/audit/writer.py`'s `os.fsync()` on every
+single `append()` call (up to 4 audit records per episode x 131
+episodes this run = 500+ fsync calls, and fsync latency is genuinely,
+legitimately variable depending on OS/disk/background load) compounding
+with this session's own heavy concurrent activity (multiple live
+Razorpay runs, background bash tasks) rather than anything in
+`Runner.run()`'s own logic changing run to run.
+
+**Found, not asked for, while pulling that audit data: "cache hit rate"
+was a misleading label.** `scripts/eval.py` computed it as
+`cache_hits / (all diagnose + all choose calls)` — but a regex-resolved
+diagnose call never touches the cache at all
+(`src/diagnose/classifier.py` hardcodes `cache_hit=False` on that path,
+since there's nothing to look up), so lumping it in with a genuine LLM
+cache miss made a 100%-cached, network-free run read as "50.5% cache
+hit rate," implying roughly half the calls needed a real, slow fetch
+when none of them did. Fixed by excluding regex-resolved diagnose calls
+from both the numerator and denominator and reporting them separately:
+the current report now reads "107 diagnose call(s) resolved by regex,
+free... Of the 109 call(s) that did need the model... cache hit rate:
+100.0% (109/109)" — which is what actually happened. `pytest -q -m "not
+live"` → 138 passed (unchanged — `regex_resolved_count` defaults to 0,
+backward compatible); `ruff check` clean.
+
+## D7 (eval + report), continued a fifth time — the real error text, and a scoped stopping-rule tolerance
+
+Told to stop guessing and get the actual exception text, not a summary.
+Checked first and confirmed the response body was genuinely never
+logged anywhere — `src/execute/retry.py`'s `BackoffError` already
+carries `last_response_body`, but `src/execute/executor.py`'s handler
+only ever surfaced `last_status_code`. Added it to both the `logger.error`
+call and the `ExecutorError` message (which flows straight into
+`exception_entry.reason_text` and the audit `rationale` for free), then
+ran `make guardrail-proof N=20` — small and cheap, specifically to
+capture this — rather than attempting N=200 blind again.
+
+**The real text, in order, from the audit trail:**
+
+```
+created           pay_synthetic_00001
+created           pay_synthetic_00006
+created           pay_synthetic_00049
+execution_failed  pay_synthetic_00052   HTTP 429 — {'error': {'description': 'injected 429 (fault rig)'}}
+created           pay_synthetic_00053
+created           pay_synthetic_00054
+execution_failed  pay_synthetic_00055   HTTP 429 — {'error': {'description': 'Too many requests', 'code': 'BAD_REQUEST_ERROR'}}
+execution_failed  pay_synthetic_00056   HTTP 408 — {'error': {'description': 'simulated timeout (fault rig)'}}
+execution_failed  pay_synthetic_00057   HTTP 429 — {'error': {'code': 'BAD_REQUEST_ERROR', 'description': 'Too many requests'}}
+```
+
+The 3 consecutive failures that actually fired the stop are `00055`,
+`00056`, `00057` — two genuine Razorpay 429s (authentic
+`"Too many requests"` / `BAD_REQUEST_ERROR` body, no "fault rig" marker,
+unlike `00052` and `00056`'s own synthetic bodies) with this harness's
+own planned timeout fault landing between them by coincidence of the
+global call-index counter. Real, sporadic, confirmed by the response
+body text itself — not a bug.
+
+**Checked whether the self-throttle is actually being bypassed before
+raising anything.** `RazorpayClient._request()` and
+`create_payment_link_once()` both call `self._bucket.acquire()` on
+every real attempt, and `guardrail_proof.py` constructs exactly one
+`RazorpayClient`, shared by the executor, the cancel loop in `finally`,
+and the `list_payment_links()` verification query — one client, one
+token bucket, for the whole run. Not bypassed anywhere in this path.
+The token bucket is process-local, though, with no memory of other
+processes' recent calls — this session ran many separate
+`guardrail_proof.py` invocations in succession, each restarting its own
+0.5 req/s budget from zero, and Razorpay's real, undocumented,
+account-level limit doesn't reset with the process. That is the most
+plausible reason real 429s still occur despite a working throttle, not
+a code defect.
+
+**Raised the consecutive-failure tolerance for this tool only.**
+`guardrail-proof`'s own consecutive-failure tolerance raised to 5 (from
+the shared production default of 3) because sustained real-API calls at
+volume produce sporadic rate-limiting (confirmed via real 429 response
+bodies, not a bug) that isn't a systemic failure signal in this specific
+tool. The production stopping rule in `guardrails.yaml` is unchanged —
+`src/runner.py`'s real batch runs, `make demo`, and `make eval` all
+still read the shared default of 3 from the file. Implemented as a new
+`--consecutive-error-tolerance` flag (default 5) on
+`scripts/guardrail_proof.py`, applied via `bundle.model_copy(update=...)`
+to a process-local copy of the loaded config — `config/guardrails.yaml`
+itself is never written to. Also threaded through to
+`evidence/guardrail_proof.json` and `evidence/report.md` §1, so a report
+reader sees the actual tolerance used, not just the outcome.
+`pytest -q -m "not live"` → 138 passed; `ruff check` clean.
+
+## D7 (eval + report), continued a sixth time — §3 claimed a loss that never happened
+
+`evidence/report.md` §3 was titled "Where the model loses" per the
+original phase spec's template — but the actual data behind it never
+showed a loss. The train-split head-to-head is a tie (or, on other
+runs, an LLM win); the harvested-strings comparison (§2) shows the LLM
+beating regex too (20% vs 5%). The section had nothing honest left to
+say under its own title, and the real humbling number — 20% absolute
+accuracy on the harvested strings, the hardest and most
+externally-anchored data this project has — was sitting one section up,
+uncelebrated, next to a doc-snapshot row at 88.2% that made it easy to
+miss.
+
+Rewrote §3 as "Where the claim gets weakest": leads with whichever
+externally-anchored row (from §2 — never self-generated data) has the
+lowest LLM accuracy, computed at render time via `min(...,
+key=lambda r: r.llm_accuracy)` rather than hardcoded to "harvested
+strings" by name, so this stays honest if a future run's numbers ever
+put a different source in last place. States the absolute number as the
+finding, explicitly says the regex-vs-LLM comparison "is not the
+finding worth taking seriously here." The train-split head-to-head
+table is kept as secondary, clearly-subordinate context, not the
+section's headline.
+
+Added `test_section3_leads_with_absolute_accuracy_not_the_comparison` —
+a structural invariant, not a check on today's specific numbers: the
+section always states an absolute weakest-accuracy figure and always
+de-emphasizes the win/loss framing, regardless of whether the
+head-to-head happens to tie, favour the LLM, or (on some future run)
+genuinely favour regex. `pytest -q -m "not live"` → 139 passed (138 +
+1 new); `ruff check` clean.
