@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T11:21:30+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "9bae37177c5b3768424aae8bd3e58b8ffc41426402cc52d55be33c7a73aad7b7",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The error indicates a request issue that likely requires human review.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re on it and will help you complete it soon.\"}",
+  "usage": {
+    "input_tokens": 682,
+    "output_tokens": 152
+  }
+}

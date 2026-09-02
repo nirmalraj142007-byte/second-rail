@@ -4,57 +4,79 @@ What is simulated, what is assumed, and what breaks at scale. Kept honest and
 updated as each phase surfaces a new one — see `BUILD_LOG.md` for the session
 each entry came from.
 
-## Razorpay test-mode account: 30 Payment Link cap (resolved 30 Aug 2026)
+## Razorpay test-mode account: the 30 Payment Link cap is not an active constraint
 
-**Current state, as of 30 Aug 2026: resolved.** The cap reset on its own —
-no documented reset window was ever found, so this wasn't fixed, it just
-stopped being true. Phase 12's attribution work confirmed it live (a real
-create + cancel succeeded on a throwaway link) and then created 9 more real
-Payment Links via `make demo --execute`, watched them, and rolled all 9 back
-cleanly. The "three real `plink_` IDs created live" acceptance step is
-demonstrable again. See `BUILD_LOG.md`'s "D6 (attribution)" entry for the
-full story, including how this was caught. The account being test-mode
-means this state itself is not guaranteed to hold — if a submission run
-hits `RATE_LIMIT_EXCEEDED` again, the section below is what that means and
-what still works regardless.
+**Current state, re-verified 2 Sep 2026: the 30-link cap does not bind this
+account, and no code, test, or config in this repo treats it as a live
+limit.** Everything below the horizontal rule in this section is *historical
+record* — kept because the wrong turn is part of the evidence, not because
+any of it still describes how the system behaves.
+
+The re-verification was a direct probe against the real test-mode API, not
+an assumption:
+
+- `GET /payment_links` returned **77 links already on the account** — well
+  past 30, which alone rules out "30 links, ever" as a live ceiling.
+- A fresh `POST /payment_links` returned **HTTP 200** (`plink_TXDsqE548QkkDB`).
+- `POST /payment_links/{id}/cancel` returned **`cancelled`**.
+
+**What I do not claim.** I have no record of Razorpay Support raising,
+lifting, or removing this cap for this account, and I am not going to write
+one down. What the evidence supports is narrower and duller: the cap was
+observed exhausted in Phase 8, was observed not exhausted in Phase 12, and
+is observed not exhausted now. No documented reset window was ever found, so
+I cannot tell you *why* it stopped binding — only that it has not bound on
+any attempt since 30 Aug 2026. A submission whose whole argument is evidence
+integrity does not get to launder an unexplained observation into a vendor
+assurance.
+
+**Consequence for the demo:** the "real `plink_` IDs created live" step is
+demonstrable. It is also not guaranteed to stay that way — this is a test
+account and the ceiling's mechanism is unknown to me. If a submission run
+does hit `RATE_LIMIT_EXCEEDED` again, the historical record below is what
+that means, and the fallbacks named there still hold.
+
+---
+
+### Historical record — Phase 8, 27-28 Aug 2026 (no longer current behaviour)
 
 Phase 1's harvest (forcing real checkout failures via Razorpay's mock bank to
 capture genuine `error_code`/`error_reason` strings) and later live-execution
 testing (Phase 8) both create real Payment Links / orders against this test
-account. Razorpay enforces a documented cap of 30 Payment Links per test-mode
-account; confirmed empirically in Phase 8 via the API's own error body —
+account. Phase 8 hit a documented cap of 30 Payment Links per test-mode
+account, confirmed empirically via the API's own error body —
 `{"code": "RATE_LIMIT_EXCEEDED", "description": "test mode limit of 30
 reached for payment_link"}` — not inferred. See
 `evidence/razorpay_field_report.md` Step 5 for the full account, including an
 earlier, wrong guess (a time-windowed limit rather than a hard cap) that this
 finding corrected.
 
-**Consequence:** this account cannot create a new real Payment Link until
-Razorpay resets the cap. No documented reset window was found in Razorpay's
-docs as of 27 Aug 2026. `src/execute/executor.py`'s `RazorpayExecutor` is
-fully unit-tested against a mocked client (`tests/test_executor.py`, 14
-tests) and its dry-run path is verified live to make zero HTTP calls; the one
-`@pytest.mark.live` test that creates a real link will legitimately skip or
-fail while the cap is exhausted, which is expected, not a bug — it is
-excluded from `pytest -m "not live"`, the run `make eval` and this project's
-default test invocation both use.
+At that time the account could not create a new real Payment Link at all.
+`src/execute/executor.py`'s `RazorpayExecutor` was, and remains, fully
+unit-tested against a mocked client (`tests/test_executor.py`) with its
+dry-run path verified live to make zero HTTP calls; the one
+`@pytest.mark.live` test that creates a real link legitimately skipped while
+the cap was exhausted, which was expected, not a bug — it is excluded from
+`pytest -m "not live"`, the invocation `make eval` and this project's default
+test run both use.
 
-**What this means for the submission:** the "three real `plink_` IDs created
-live" acceptance step cannot be re-demonstrated on this account right now.
-What *is* demonstrated against the real API, real 429 included: the
-hand-rolled backoff (1s → 2s → 4s, config-driven from
+What Phase 8 did demonstrate against the real API, real 429 included: the
+hand-rolled backoff (1s -> 2s -> 4s, config-driven from
 `config/guardrails.yaml`, not hardcoded), the retry cap stopping at 3
 attempts, and the episode landing in the exception list rather than crashing
-the batch — the same behavior the phase's fault-injection acceptance test
-independently asks for, triggered here by a real account limit instead of a
-synthetic one.
+the batch — the same behaviour the fault-injection acceptance test
+independently asks for, triggered there by a real account limit instead of a
+synthetic one. That evidence stands on its own and does not depend on the
+cap's current state.
 
 Razorpay's documented server-side rejection of a duplicate `reference_id`
 (a 400 response, per its Payment Links "Create" error-list docs) is
 implemented defensively in `RazorpayExecutor.create_recovery_link` — treated
-identically to local idempotency dedup — but is untested against the live
-API for the same reason: it requires a successful creation to duplicate
-against.
+identically to local idempotency dedup. Phase 8 could not test it against the
+live API, because doing so requires a successful creation to duplicate
+against. Phase 17 could, and did: see `evidence/razorpay_field_report.md`
+Step 5.
+
 
 ## What breaks at 10k episodes/day (design-level, not yet load-tested)
 

@@ -55,7 +55,12 @@ from ulid import ULID
 
 from scripts import seal as seal_module
 from scripts.holdout_guard import open_labels
-from src.attribute.ledger import compute_fp_cost, parse_outcome_assumptions
+from src.attribute.ledger import (
+    compute_fp_cost,
+    parse_outcome_assumptions,
+    post_expected_gross,
+    post_net,
+)
 from src.audit.writer import AuditWriter
 from src.choose.policy import PolicyEngine
 from src.choose.selector import ActionSelector
@@ -66,6 +71,7 @@ from src.diagnose.baseline import RegexBaseline
 from src.diagnose.cache import DiskCache
 from src.diagnose.classifier import Diagnoser, Diagnosis
 from src.diagnose.llm_client import build_llm_client, compute_cost_paise, load_pricing
+from src.errors import AttributionError
 from src.execute.executor import Executor, FixtureExecutor, RazorpayExecutor
 from src.gate.checks import Episode
 from src.logging_setup import get_logger, setup_logging
@@ -314,6 +320,36 @@ def build_recovery_figure(
             goodwill_cost_paise=assumptions.goodwill_cost_paise,
         )
     )
+    # The ledger, not the sweep, is the system of record for net. Post the
+    # base case through the same post_net() every live run uses, then assert
+    # the sweep agrees with it — if these two ever diverge, the report is
+    # rendering a number the ledger cannot account for, which is exactly the
+    # drift ledger.py's module docstring promises cannot happen.
+    post_expected_gross(
+        conn,
+        run_id,
+        amount_paise=sweep.gross_base_paise,
+        basis=(
+            "expected value, NOT realised recovery: "
+            f"sum(response_probability x amount_paise) over the {len(contacted)} "
+            "episode(s) this run contacted, using outcome_model.md's pre-registered "
+            "per-episode response_probability. No customer paid a synthetic link; "
+            "see evidence/report.md section 4."
+        ),
+    )
+    net_paise = post_net(conn, run_id)
+    if net_paise != sweep.net_base_paise:
+        raise AttributionError(
+            f"ledger net ({net_paise}p) disagrees with the sensitivity sweep's base-case "
+            f"net ({sweep.net_base_paise}p) for run {run_id}",
+            code="ATTRIBUTION_FAILURE",
+            remediation=(
+                "net must be computed only by post_net(); if the sweep now derives it "
+                "differently, reconcile src/report/sensitivity.py with "
+                "src/attribute/ledger.py rather than reporting either number"
+            ),
+        )
+
     figure = RecoveryFigure(
         label=label,
         gross_low_paise=sweep.gross_low_paise,

@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T10:17:40+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "55128dc51dafa6a517ac7f91e6ca0e73eee71c9e466faa259f1ade68f96c9156",
+  "response": "{\"chosen_action\":\"no_action\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The failure is a repeat UPI BAD_REQUEST_ERROR with no prior contacts, so no immediate action is needed.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re working on a solution for you.\"}",
+  "usage": {
+    "input_tokens": 682,
+    "output_tokens": 152
+  }
+}

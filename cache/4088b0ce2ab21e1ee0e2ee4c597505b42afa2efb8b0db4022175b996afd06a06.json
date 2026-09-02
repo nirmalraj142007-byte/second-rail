@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T09:16:22+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "4088b0ce2ab21e1ee0e2ee4c597505b42afa2efb8b0db4022175b996afd06a06",
+  "response": "{\"class_id\":\"C3\",\"confidence\":0.95,\"rationale\":\"error_description indicates an incorrect card number, matching invalid_entered_details.\",\"features_used\":[\"error_description\"]}",
+  "usage": {
+    "input_tokens": 1157,
+    "output_tokens": 79
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-31T22:44:55+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "56f673812c09e9e58c696653e04e3a88ebe5756fba6c88fc4fb7f53a99504048",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The failure is a BAD_REQUEST_ERROR with no prior contacts and high-value segment, so escalation to support is appropriate.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re working on a solution and will reach out shortly.\"}",
+  "usage": {
+    "input_tokens": 683,
+    "output_tokens": 148
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T10:24:52+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "8995b2b38f0839f2cd9f53a0ec7608bec3a902e024c6286f141bf532e3dc11c8",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The failure is due to a user error (C8) with no prior contacts, so a human review is needed.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re working on a solution for you.\"}",
+  "usage": {
+    "input_tokens": 682,
+    "output_tokens": 143
+  }
+}

@@ -12,7 +12,7 @@ else
 	PIP := $(VENV_BIN)/pip
 endif
 
-.PHONY: setup doctor lint test clean data seal verify-seal eval demo approve verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve tunnel replay-webhooks gate-run failure-demo failure-demo-backup guardrail-proof classify choose-run watch thresholds
+.PHONY: setup doctor lint test clean data seal verify-seal eval demo approve demo-states verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve webui tunnel replay-webhooks gate-run failure-demo failure-demo-backup guardrail-proof classify choose-run watch thresholds judge-check
 
 setup:
 	$(PYTHON311) -m venv .venv
@@ -64,8 +64,21 @@ gate-run:
 demo:
 	$(PY) -m scripts.demo $(if $(EXECUTE),--execute) $(if $(LIMIT),--limit $(LIMIT))
 
+# With no ID=, prints the pending/expired demo/approval_queue.json table.
+# ID=ep_017 resolves that one item (approve by default; REJECT=1 to refuse,
+# REASON="..." to record why). The interactive keypress prompt inside
+# `make demo` resolves most human_keystroke episodes on the spot; this is
+# the non-interactive fallback for whatever's left — see src/ui/approve.py.
 approve:
-	@echo "not yet built — phase 8 (make approve)"
+	$(PY) -m src.ui.approve $(if $(ID),--id $(ID)) $(if $(REJECT),--reject) \
+		$(if $(REASON),--reason "$(REASON)")
+
+# Drives each of the 8 required demo states deliberately and exports one
+# SVG per state into demo/states/ (rich.console.Console(record=True) +
+# export_svg) — rehearsal material and proof every state exists, not just
+# claimed. See scripts/demo_states.py.
+demo-states:
+	$(PY) -m scripts.demo_states
 
 verify-audit:
 	$(PY) -m src.audit.verify --all
@@ -88,6 +101,15 @@ migrate:
 serve:
 	$(PY) -m uvicorn src.ingest.app:app --port 8000
 
+# Read-only companion dashboard (src/webui/) — a second window into the
+# same run, not a replacement for `make demo`'s terminal. Binds to
+# 127.0.0.1 only, on a different port than `make serve`'s public webhook
+# receiver, on purpose: this process has a write action (approve/reject)
+# and must never be reachable through the same tunnel as the webhook
+# endpoint. Run it alongside `make demo` in another terminal.
+webui:
+	$(PY) -m uvicorn src.webui.app:app --port 8001 --host 127.0.0.1
+
 # cloudflared prints a public HTTPS URL on stdout — paste that URL, with
 # /webhooks/razorpay appended, into the Razorpay dashboard's webhook config.
 # The URL changes on every restart of this command, so the dashboard config
@@ -103,6 +125,15 @@ db-check:
 
 config-check:
 	$(PY) -m scripts.config_check
+
+# The eighteen Judge-Gap Matrix rows, one PASS/FAIL line each, exit 1 if any
+# fail. Runs `make eval`, `make demo`, `make verify-audit`, `make rollback`
+# and `make config-check` as real subprocesses (JG-05) rather than asserting
+# they would work, so this takes a minute or two. SKIP_SLOW=1 drops the
+# shell-out rows for fast iteration on the prose rows -- it is not a gate,
+# and the tool says so in its own output when you use it.
+judge-check:
+	$(PY) -m scripts.judge_check $(if $(SKIP_SLOW),--skip-slow)
 
 # Phase 14 — sweeps auto_approve_ceiling_paise, outage_cluster_threshold,
 # and executor_retry_cap over real code (GateEngine / compute_cluster_

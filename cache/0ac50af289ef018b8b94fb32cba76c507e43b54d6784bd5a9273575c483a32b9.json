@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T09:13:46+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "0ac50af289ef018b8b94fb32cba76c507e43b54d6784bd5a9273575c483a32b9",
+  "response": "{\"class_id\":\"C8\",\"confidence\":0.35,\"rationale\":\"error_reason and error_description are generic gateway envelope with no distinguishing text, suggesting a gateway-side technical fault.\",\"features_used\":[\"error_reason\",\"error_description\",\"error_source\"]}",
+  "usage": {
+    "input_tokens": 1152,
+    "output_tokens": 102
+  }
+}

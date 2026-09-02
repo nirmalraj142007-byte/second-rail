@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Second Rail — dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="banner">
+      <h1>Second Rail &middot; dashboard</h1>
+      <div class="meta" id="banner-meta">
+        <span><span class="pulse" id="pulse"></span><span id="run-status">no active run</span></span>
+      </div>
+    </header>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Episode stream</h2>
+        <span class="hint" id="stream-hint">polling every 1.5s</span>
+      </div>
+      <div class="panel-body">
+        <div id="stream"><div class="empty-state">No active run.</div></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Approval queue</h2>
+        <span class="hint" id="queue-hint"></span>
+      </div>
+      <div class="panel-body">
+        <div id="queue"><div class="empty-state">Queue empty.</div></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Run summary</h2>
+      </div>
+      <div class="panel-body">
+        <div class="summary-grid" id="summary-grid">
+          <div class="stat actioned"><div class="label">actioned</div><div class="value">&mdash;</div></div>
+          <div class="stat suppressed"><div class="label">suppressed</div><div class="value">&mdash;</div></div>
+          <div class="stat pending"><div class="label">pending</div><div class="value">&mdash;</div></div>
+          <div class="stat execution_failed"><div class="label">execution failed</div><div class="value">&mdash;</div></div>
+        </div>
+      </div>
+    </section>
+
+    <div id="error-slot"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

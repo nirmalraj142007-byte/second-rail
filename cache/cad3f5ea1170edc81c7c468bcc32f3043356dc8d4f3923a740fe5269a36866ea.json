@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T10:25:40+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "cad3f5ea1170edc81c7c468bcc32f3043356dc8d4f3923a740fe5269a36866ea",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The failure is likely due to a user error and requires human assistance.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re on it and will help you complete it shortly.\"}",
+  "usage": {
+    "input_tokens": 683,
+    "output_tokens": 143
+  }
+}

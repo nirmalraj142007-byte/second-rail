@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T11:27:06+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "bd94f6011077d4c53cf81b118c888ccc09f2840ef779a980a2a32bcb391e7290",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The error indicates a user input issue; escalation to support is appropriate.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re on it and will help you complete it soon.\"}",
+  "usage": {
+    "input_tokens": 685,
+    "output_tokens": 152
+  }
+}

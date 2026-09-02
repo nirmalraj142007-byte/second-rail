@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-31T22:43:07+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "2b81d6edff79531d39b025a57dc6e0ab5149d141161b481edb1676a91a8677aa",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The failure is a repeat UPI request with a BAD_REQUEST_ERROR, so a human review is needed.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re working on a solution for you.\"}",
+  "usage": {
+    "input_tokens": 682,
+    "output_tokens": 143
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T10:29:20+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "fb363a8057bf6e62d4eaa1236e50fd69c7a8d8998a27d24131f56a4d52f13814",
+  "response": "{\"chosen_action\":\"link_alt_instrument\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The failure is a BAD_REQUEST_ERROR with no prior contacts, so offering a new payment link is appropriate.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re sending you a new link to complete it shortly.\"}",
+  "usage": {
+    "input_tokens": 717,
+    "output_tokens": 132
+  }
+}

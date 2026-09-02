@@ -285,6 +285,38 @@ def upsert_policy_rules(conn: sqlite3.Connection, policy: PolicyTable) -> None:
     conn.commit()
 
 
+def insert_approval(
+    conn: sqlite3.Connection,
+    *,
+    approval_id: str,
+    episode_id: str,
+    required: bool,
+    tier: str,
+    approved_by: str | None,
+    approved_at: str | None,
+    rejected_reason: str | None,
+    expires_at: str | None,
+) -> None:
+    """One row per human_keystroke-tier episode that actually reached a
+    human decision — via the interactive prompt (src/ui/live.py) or the
+    JSON-queue fallback (src/ui/approve.py). Both paths write through this
+    same function, so `approval` stays the single system of record either
+    way."""
+    conn.execute(
+        """
+        INSERT INTO approval (
+            approval_id, episode_id, required, tier, approved_by, approved_at,
+            rejected_reason, expires_at
+        ) VALUES (?,?,?,?,?,?,?,?)
+        """,
+        (
+            approval_id, episode_id, int(required), tier, approved_by, approved_at,
+            rejected_reason, expires_at,
+        ),
+    )
+    conn.commit()
+
+
 def insert_decision(
     conn: sqlite3.Connection,
     *,

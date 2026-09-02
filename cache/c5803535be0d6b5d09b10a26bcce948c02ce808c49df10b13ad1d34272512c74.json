@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T11:23:18+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "c5803535be0d6b5d09b10a26bcce948c02ce808c49df10b13ad1d34272512c74",
+  "response": "{\"chosen_action\":\"no_action\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The failure is retryable and no immediate action is required.\",\"copy_customer_facing\":\"Your payment didn’t go through, but you can try again shortly to complete it.\"}",
+  "usage": {
+    "input_tokens": 683,
+    "output_tokens": 145
+  }
+}

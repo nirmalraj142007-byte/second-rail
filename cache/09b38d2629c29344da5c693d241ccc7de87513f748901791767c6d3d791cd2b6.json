@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T11:26:19+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "09b38d2629c29344da5c693d241ccc7de87513f748901791767c6d3d791cd2b6",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The failure is a BAD_REQUEST_ERROR for a first‑time card payment, so escalation to a human agent is the safest next step.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re on it and will help you complete it shortly.\"}",
+  "usage": {
+    "input_tokens": 683,
+    "output_tokens": 163
+  }
+}

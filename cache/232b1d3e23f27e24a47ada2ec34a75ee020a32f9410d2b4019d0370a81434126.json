@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T10:18:40+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "232b1d3e23f27e24a47ada2ec34a75ee020a32f9410d2b4019d0370a81434126",
+  "response": "{\"chosen_action\":\"no_action\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The failure is due to a customer error, so no recovery action is needed.\",\"copy_customer_facing\":\"Your payment didn’t go through, but you can try again shortly.\"}",
+  "usage": {
+    "input_tokens": 684,
+    "output_tokens": 122
+  }
+}

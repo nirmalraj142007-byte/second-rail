@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T11:15:42+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "b50789c72cb25d2648c972d5757d0bfadf5e110e1c436bf72bdc5e1eb93d130e",
+  "response": "{\"chosen_action\":\"no_action\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The failure is a repeat UPI error with no prior contacts, so no immediate action is needed.\",\"copy_customer_facing\":\"Your payment didn’t go through, but you can try again shortly.\"}",
+  "usage": {
+    "input_tokens": 682,
+    "output_tokens": 151
+  }
+}

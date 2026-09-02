@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T11:19:18+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "b7152aa7d44a824c6ddf4529261611d1f30ea136ca05518a9faa1e40e1b6f54d",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\"],\"rationale\":\"The error indicates a request issue with a new card, so a human review is needed.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re working on a solution and will update you shortly.\"}",
+  "usage": {
+    "input_tokens": 683,
+    "output_tokens": 122
+  }
+}

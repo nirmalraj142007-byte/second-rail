@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T09:18:10+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "895a0d2cbd9e77f1a16602ede82c348b3247e1eeedaf8b7c1783bcb2c55d9d32",
+  "response": "{\"class_id\":\"C9\",\"confidence\":0.7,\"rationale\":\"error_description indicates app registration issue, suggesting the app/device could not be reached or used.\",\"features_used\":[\"error_description\"]}",
+  "usage": {
+    "input_tokens": 1170,
+    "output_tokens": 133
+  }
+}

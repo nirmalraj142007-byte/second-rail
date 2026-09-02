@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T11:13:07+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "3216d668ca4ac5ce0b9921d2ddc53dbfe7df6208008e0f0c77060b8a221c607d",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The error indicates a user‑side issue; a human can guide the customer to resolve it.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re sending a support agent to help you complete it.\"}",
+  "usage": {
+    "input_tokens": 683,
+    "output_tokens": 153
+  }
+}

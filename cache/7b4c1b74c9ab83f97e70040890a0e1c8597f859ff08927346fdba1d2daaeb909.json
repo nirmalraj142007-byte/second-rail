@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T11:17:31+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "7b4c1b74c9ab83f97e70040890a0e1c8597f859ff08927346fdba1d2daaeb909",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The failure is a BAD_REQUEST_ERROR on a high-value UPI payment, so a human review is needed.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re sending a support team to help you complete it.\"}",
+  "usage": {
+    "input_tokens": 683,
+    "output_tokens": 166
+  }
+}

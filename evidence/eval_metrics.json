@@ -22,12 +22,12 @@
     "net_low_paise": 5141151,
     "stopped_reason": "cap_breach"
   },
-  "baseline_run_id": "01M1EC6B8P1X744E0QR2J5NWG3",
+  "baseline_run_id": "01M1HDWA5J2S0YK0CFCRFHFD00",
   "classification_accuracy": 1.0,
-  "elapsed_s": 14.014999999897555,
+  "elapsed_s": 14.781999999890104,
   "llm_cost_paise_real": 109,
   "llm_cost_paise_this_run": 0,
-  "run_id": "01M1EC64PA49P2QT1230919DG0",
+  "run_id": "01M1HDW2WY0D7097JGRFD5NNBR",
   "second_rail_by_outcome": {
     "actioned": 99,
     "pending": 69,
@@ -50,5 +50,5 @@
     "net_low_paise": 5148164,
     "stopped_reason": "cap_breach"
   },
-  "throughput_epm": 1445.6501746885947
+  "throughput_epm": 1327.254305973118
 }

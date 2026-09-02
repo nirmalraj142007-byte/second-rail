@@ -121,12 +121,17 @@ def _newest_audit_file(audit_dir: Path) -> Path | None:
 def _short(h: str | None) -> str:
     if h is None:
         return "None"
-    return h[:11] + "…" if len(h) > 11 else h
+    # Plain ASCII only — cmd.exe / a legacy Windows console on the cp1252
+    # codepage raises UnicodeEncodeError on non-ASCII punctuation (reproduced
+    # directly against this project's own tooling; see src/ui/theme.py's
+    # matching comment). This is `make verify-audit`'s failure path, called
+    # on camera, so it must survive that console too.
+    return h[:11] + "..." if len(h) > 11 else h
 
 
 def _print_failure(result: VerifyResult) -> None:
     typer.echo(
-        f"chain BROKEN at seq {result.first_bad_seq} — "
+        f"chain BROKEN at seq {result.first_bad_seq} - "
         f"expected {_short(result.expected)} got {_short(result.actual)}"
     )
 
@@ -195,7 +200,7 @@ def main(
                 _print_failure(result)
                 raise typer.Exit(code=1)
             total_count += result.count
-        typer.echo(f"chain intact — {total_count} records ({total_elapsed:.2f}s)")
+        typer.echo(f"chain intact - {total_count} records ({total_elapsed:.2f}s)")
         return
 
     target = audit_dir / f"{run_id}.jsonl" if run_id else _newest_audit_file(audit_dir)
@@ -207,7 +212,7 @@ def main(
     if not result.intact:
         _print_failure(result)
         raise typer.Exit(code=1)
-    typer.echo(f"chain intact — {result.count} records ({result.elapsed_s:.2f}s)")
+    typer.echo(f"chain intact - {result.count} records ({result.elapsed_s:.2f}s)")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T09:24:22+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "1dcd6a4762040bfe7f87ae5484cb7dcf972fedaab04a00648ac00340bd5adc01",
+  "response": "{\"class_id\":\"C2\",\"confidence\":0.9,\"rationale\":\"error_reason is card_declined, indicating the issuer declined the payment.\",\"features_used\":[\"error_reason\"]}",
+  "usage": {
+    "input_tokens": 1153,
+    "output_tokens": 89
+  }
+}

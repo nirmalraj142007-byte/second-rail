@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-31T22:41:43+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "21d593d2e104503ee1992799de77409f141ab801ccf3fbf067cb09b1815521ec",
+  "response": "{\"chosen_action\":\"link_same_instrument\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The error indicates a bad request; retrying with the same instrument is the appropriate next step.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’ve sent you a new link to try again with the same payment method.\"}",
+  "usage": {
+    "input_tokens": 726,
+    "output_tokens": 128
+  }
+}

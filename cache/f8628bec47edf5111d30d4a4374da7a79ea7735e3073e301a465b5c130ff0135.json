@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T09:27:46+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "f8628bec47edf5111d30d4a4374da7a79ea7735e3073e301a465b5c130ff0135",
+  "response": "{\"class_id\":\"C6\",\"confidence\":0.9,\"rationale\":\"error_reason is payment_cancelled and error_source is customer, matching customer_abandoned.\",\"features_used\":[\"error_reason\",\"error_source\"]}",
+  "usage": {
+    "input_tokens": 1164,
+    "output_tokens": 63
+  }
+}

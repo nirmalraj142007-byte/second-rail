@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T09:16:58+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "819d99c9f15ea0b61d4a57b3f571f0affeebd4ae46f9b57ddf03c3fd95d05819",
+  "response": "{\"class_id\":\"C3\",\"confidence\":0.9,\"rationale\":\"error_description indicates missing UPI PIN, a customer data/setup issue matching invalid_entered_details.\",\"features_used\":[\"error_description\"]}",
+  "usage": {
+    "input_tokens": 1167,
+    "output_tokens": 169
+  }
+}

@@ -16,10 +16,11 @@ __pycache__/
 *.db-shm
 second_rail.db
 
-# LLM response cache — committed from Phase 18 onward so `make eval` runs
-# offline with no key. Until then, generated cache entries stay untracked.
-cache/*.json
-!cache/.gitkeep
+# LLM response cache — COMMITTED, deliberately. `make eval` on a clean clone
+# must produce evidence/report.md with no API key, and it can only do that if
+# every prompt the eval issues is already answered on disk. These are content-
+# addressed responses to this repo's own prompts, ~1.2MB total; they are
+# evidence, not build output. Do not add cache/*.json back to this file.
 
 # Per-run audit chains are working output, not evidence — a small,
 # committed excerpt (evidence/audit_sample.jsonl) is added in Phase 18.

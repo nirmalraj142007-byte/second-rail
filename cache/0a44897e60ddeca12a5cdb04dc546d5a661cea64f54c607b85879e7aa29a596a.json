@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-31T22:34:59+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "0a44897e60ddeca12a5cdb04dc546d5a661cea64f54c607b85879e7aa29a596a",
+  "response": "{\"class_id\":\"C2\",\"confidence\":0.95,\"rationale\":\"error_reason indicates card_disabled_for_online_payments, matching issuer_declined.\",\"features_used\":[\"error_reason\"]}",
+  "usage": {
+    "input_tokens": 1157,
+    "output_tokens": 82
+  }
+}

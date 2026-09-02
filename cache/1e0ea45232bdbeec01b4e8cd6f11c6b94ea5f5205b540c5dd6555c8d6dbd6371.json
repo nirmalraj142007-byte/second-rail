@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T10:23:40+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "1e0ea45232bdbeec01b4e8cd6f11c6b94ea5f5205b540c5dd6555c8d6dbd6371",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The failure is a high-value card transaction with no prior contacts, so escalation to support is appropriate.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re working on a solution and will update you shortly.\"}",
+  "usage": {
+    "input_tokens": 683,
+    "output_tokens": 133
+  }
+}

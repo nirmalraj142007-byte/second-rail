@@ -37,9 +37,16 @@ therefore runs in two passes:
      rare case a scenario's order_id can't be recovered:
        python -m scripts.harvest_errors record <reference_id> <payment_id>
 
-The manifest is resumable by design: Razorpay caps test-mode accounts at
-30 Payment Links, so this cannot be a single always-succeeds automated
-run, and re-running must never recreate links that already exist.
+The manifest is resumable by design, and stays that way regardless of what
+any account-level ceiling is doing. A test-mode account can start refusing
+`POST /payment_links` mid-harvest for reasons outside this script's control
+— Phase 8 hit `RATE_LIMIT_EXCEEDED "test mode limit of 30 reached for
+payment_link"` on this very account (historical; that cap has not bound
+since 30 Aug 2026 and re-verified clear on 2 Sep 2026 — see
+LIMITATIONS.md). The manifest exists so a partial run resumes instead of
+restarting, and so re-running never recreates links that already exist.
+That property is what makes the script safe to re-run, not an assumption
+about any particular limit being in force.
 """
 
 from __future__ import annotations
@@ -575,19 +582,15 @@ def _write_field_report(probe: dict[str, Any] | None, records: list[dict[str, An
     lines.append("")
     if probe is None:
         lines.append(
-            "**Attempted with real credentials, not yet completed.** Every attempt this session hit "
-            "`HTTP 429 {\"error\": {\"code\": \"BAD_REQUEST_ERROR\", \"description\": \"Too many "
-            "requests\"}}` on the probe's first `create_payment_link` call — the same undocumented "
-            "rate limit that slowed the main harvest (see BUILD_LOG.md for the full account). "
-            "Cancelling an already-used link did not free capacity, which argues against this being "
-            "the documented \"30 Payment Links per business\" cap specifically and for it being a "
-            "time-windowed limit instead — but that is inference, not a confirmed mechanism. "
-            "Razorpay's own Payment Links \"Create\" error list documents `payment link creation "
-            "with reference ID already attempted` as a 400 response to a duplicate `reference_id`, "
-            "which is the expected answer once this probe can actually run — but that is the "
-            "documented answer, not yet the empirically confirmed one, and this project does not "
-            "treat those as interchangeable. Re-run `make harvest` later to complete it; the result "
-            "will be persisted to evidence/harvest_probe_result.json the first time it succeeds."
+            "**Not completed on this run.** The probe's first `create_payment_link` call did not "
+            "succeed, so there was nothing to duplicate against and the probe was skipped — see the "
+            "stderr line this run emitted for the specific error. Razorpay's own Payment Links "
+            "\"Create\" error list documents `payment link creation with reference ID already "
+            "attempted` as a 400 response to a duplicate `reference_id`, and this project confirmed "
+            "that empirically on 2 Sep 2026 (HTTP 400, `BAD_REQUEST_ERROR`) — but the documented "
+            "answer and the confirmed one are not interchangeable, so this section reports only what "
+            "*this* run observed. Re-run `make harvest` to complete it; the result is persisted to "
+            "evidence/harvest_probe_result.json and reused on later runs."
         )
     else:
         lines.append(f"- reference_id used: `{probe['reference_id']}`")

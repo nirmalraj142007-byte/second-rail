@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T11:11:54+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "b6ba6297a1e6686b7fb09f26a1110e4f524cf85af83143e7ab01b7bdb5cc09f9",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The failure is a card error with no prior contacts, so a human review is needed.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re working on a solution for you.\"}",
+  "usage": {
+    "input_tokens": 683,
+    "output_tokens": 139
+  }
+}

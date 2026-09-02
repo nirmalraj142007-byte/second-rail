@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T11:27:42+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "41e649c6ea415a810bc016a8634ae3d08411be12322f51ed1d0ffa81393549cf",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The error indicates a bad request that likely requires manual review, especially for a high-value UPI transaction.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re working on a solution and will update you shortly.\"}",
+  "usage": {
+    "input_tokens": 683,
+    "output_tokens": 134
+  }
+}

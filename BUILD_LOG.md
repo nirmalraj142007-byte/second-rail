@@ -4,6 +4,26 @@ Entries are written at the end of each working session and are never
 backfilled. If a session isn't logged the day it happened, it doesn't get
 added later — that's the point of this file existing at all.
 
+
+
+## Wrong turns
+
+Ten places across ten sessions where my first read of a problem was the
+wrong one, and I said so in the entry rather than quietly fixing it. This
+index sits at the top because it is the part of this log worth reading
+first: a build log that only records what worked is a press release.
+
+- [D1 (evening) - 25 Aug 2026](#d1-evening--25-aug-2026) - expected a headless server-to-server endpoint for forcing UPI failures. There isn't one; the harvest needs the hosted checkout and its mock bank.
+- [D1 (night) - 25 Aug 2026](#d1-night--25-aug-2026) - assumed Razorpay's Payment Links rate limit was a per-second thing a token bucket could ride out. At 2 rps, 14 of 26 creations still 429'd after four retries.
+- [D2 (later) - 26 Aug 2026](#d2-later--26-aug-2026) - `verify-audit` printed `chain BROKEN at seq 1000` reproducibly and I spent the time distrusting my own hash math. The bug was not in `verify_chain()`.
+- [D4 - 27 Aug 2026](#d4--27-aug-2026) - froze "now" to one instant across a 600-episode batch for reproducibility, which quietly broke every time-dependent gate check.
+- [D4 (later) - 27 Aug 2026](#d4-later--27-aug-2026) - assumed the live acceptance test would just work because keys were already in `.env`. Every create returned 429 on the first attempt, regardless of client-side pacing.
+- [D5 - 28 Aug 2026](#d5--28-aug-2026) - modelled an injected timeout as the `(0, {...})` shape the client returns on a transport error. The real path does not go through that return.
+- [D6 - 30 Aug 2026](#d6--30-aug-2026) - three in one afternoon: a 404 on `gemini-2.5-flash`, broken JSON that turned out to be thinking tokens billed against the output budget, and a documented free-tier RPM that did not hold.
+- [D6 (later) - 30 Aug 2026](#d6-later--30-aug-2026) - wrote meta-commentary into the selection prompt promising the model would never see a cap or a ceiling. The word "cap" in that sentence failed the forbidden-token test immediately.
+- [D6 (attribution) - 30 Aug 2026](#d6-attribution--30-aug-2026) - twice: assumed the Payment Link cap was still exhausted and built the module around fixtures, then leaked a rupee glyph into a parser regex and tripped the repo's own money-literal grep.
+- [D9 (judge-gap closure) - 2 Sep 2026](#d9-judge-gap-closure--2-sep-2026) - went in believing Razorpay Support had raised the test-mode link cap to unlimited. No record of that exists anywhere in this repo; the cap reset on its own and I cannot say why.
+
 ## D1 — 25 Aug 2026
 
 Phase 0 only: repo skeleton, typed settings, the closed error taxonomy,
@@ -1676,3 +1696,132 @@ pass calls, not by touching `insert_execution()`'s broad except clause
 — that clause's breadth is itself worth narrowing, but is out of this
 phase's scope. `pytest -q -m "not live"` → 139 passed (unchanged);
 `ruff check src tests scripts experiments` clean.
+
+## D9 (judge-gap closure) — 2 Sep 2026
+
+Phase 17: `scripts/judge_check.py` (`make judge-check`) — eighteen checks,
+one PASS/FAIL line each, exit 1 if any fail — plus the documents it turned
+out I had been describing rather than writing: `README.md`,
+`docs/scaling-failures.md`, `docs/out-of-scope.md`, and the completion of
+`docs/where-the-llm-is-not.md`.
+
+The point of writing the checker before fixing anything was to find out how
+much of the Judge-Gap Matrix I had actually closed versus how much I
+believed I had closed. First run: 9 of 18. That gap is the entry.
+
+**Four real defects the checker found, none of them cosmetic.**
+
+1. **`make rollback` crashed on a fresh clone.** `src/execute/rollback.py`
+   called `get_connection(settings.db_path)` on a database that migrate had
+   never touched, so a rollback of a run that created nothing died on
+   `sqlite3.OperationalError: no such table: execution`. It also demanded
+   Razorpay credentials before it knew whether there was anything to
+   cancel — which means the "no API key required" promise was false for
+   one of the four commands a judge is told to run. Fixed by splitting out
+   `count_created_links()` and short-circuiting: a run with zero created
+   links prints "nothing to roll back" and exits 0 without a key or an HTTP
+   client. I only noticed because JG-05 runs the target instead of asserting
+   it would work.
+
+2. **`net` was never posted to the ledger on an eval run.**
+   `src/attribute/ledger.py`'s module docstring claims `post_net()` is "the
+   *only* place net is ever computed", and `src/runner.py` and
+   `scripts/watch.py` both honour that. `scripts/eval.py` did not — it
+   called `compute_fp_cost()` and then let `src/report/sensitivity.py`
+   subtract fp from gross itself. So the reported net came from a second
+   implementation, and `ledger_entry` for both eval databases held exactly
+   one row, of kind `fp_cost`. The docstring had been wrong since Phase 13
+   and I had read it several times without noticing, because I was reading
+   it as a description of intent rather than a claim to verify. Fixed by
+   adding `post_expected_gross()` and routing eval through `post_net()`,
+   then asserting the ledger's net equals the sweep's base case and raising
+   `AttributionError` if they ever diverge.
+
+3. **The escalation tier was logged without a reason.** Every audit record
+   carried `escalation_tier`, so I had been calling tiered escalation done.
+   Grouping the audit log by tier showed `auto` and `human_keystroke`
+   carrying identical reason sets, because there was no reason field at all
+   — only the tier string, which says what happened and not why. The judge
+   expectations ask for "each with a named reason written to the audit
+   log," and I had shipped the first half. Added `TierReason` to
+   `src/gate/engine.py` (`under_auto_approve_ceiling`,
+   `over_auto_approve_ceiling`, `batch_contact_ceiling_reached`,
+   `hard_refuse_condition`), made `_compute_tier()` return the pair, and
+   threaded `escalation_reason` through the writer and the runner.
+
+4. **No `out_of_order` record existed anywhere in the audit log.** The code
+   handles it (`src/ingest/service.py`), the test asserts it
+   (`test_captured_with_no_prior_failed_is_out_of_order`), and the fixture
+   exists (`fixtures/webhooks/payment_captured_orphan.json`) — but nothing
+   had ever run the fixture against a live ingest server, so the behaviour
+   was tested and undemonstrated. Ran the server and `make replay-webhooks`;
+   the log now holds 3 `out_of_order` events and 1 duplicate alongside them.
+
+**Where the first hypothesis was wrong — I re-verified a limit I had been
+told was lifted, and it had not been lifted.**
+
+I went into this session believing the test-mode Payment Link cap had been
+raised to unlimited by Razorpay Support, and intending to write that into
+`LIMITATIONS.md` as the current state. Nothing in this repo supports it.
+What `LIMITATIONS.md` and the D6 entry actually say is that the cap **reset
+on its own**, with no reset window documented anywhere and no Support
+interaction recorded — a `grep` for "support", "raised", "lifted" and
+"unlimited" across the repo returns one hit, and it is about a Gemini token
+budget.
+
+So I probed rather than wrote it down. `GET /payment_links` returned 77
+links already on the account, which alone rules out "30 ever" as a live
+ceiling; a fresh create returned HTTP 200 (`plink_TXDsqE548QkkDB`) and
+cancel returned `cancelled`. The cap is demonstrably not binding. But
+"observed not binding on every attempt since 30 Aug" and "Razorpay Support
+raised it to unlimited" are different claims, and only one of them is mine
+to make. `LIMITATIONS.md` now separates the current state from the Phase 8
+historical record with a rule, and says explicitly that I cannot explain
+*why* it stopped binding. Writing down a vendor assurance I never received
+would have been exactly the laundered-number failure this whole submission
+is built to avoid — and in the one document a judge reads to find out what
+I am unsure about.
+
+The useful side effect: because creation works, the `reference_id`
+duplicate-rejection probe that had been blocked since Phase 8 finally ran.
+Razorpay returns **HTTP 400 `BAD_REQUEST_ERROR`** on a repeated
+`reference_id`. That path in `RazorpayExecutor.create_recovery_link` had
+been implemented defensively from the docs and never exercised against the
+live API; it is now confirmed rather than assumed. The exact wording also
+differs from Razorpay's published error list, which is a second small
+doc-drift finding of the same kind as the `order_id` one in Step 2.
+Persisted to `evidence/harvest_probe_result.json` and written up in
+`evidence/razorpay_field_report.md` Step 5.
+
+**Two design decisions inside the checker I want to be able to defend.**
+
+The banned-phrase rows (JG-02, JG-10, JG-11, JG-17) have an obvious
+self-reference problem: the files that *state* a ban necessarily contain the
+banned phrase. Rather than tune the checks until they passed, there are two
+explicit exemptions, both printed in the tool's own output — a named
+`QUOTED_RULE_FILES` set (the two spec documents, my operating notes, the
+checker, its test) and a rule that an occurrence enclosed in markdown
+backticks is quoted code rather than a claim. A judge can read those five
+filenames and disagree with me. A silent exclusion they could not see would
+be worth nothing.
+
+The second: JG-05 shells out to `make eval`, `make demo`, `make
+verify-audit`, `make rollback` and `make config-check` as real subprocesses
+with bounded timeouts, which makes `make judge-check` take a couple of
+minutes. I considered asserting the targets exist instead. The rollback bug
+above is the argument against that, and it was found in the first run.
+
+Also: `make` is not installed on this machine — only `mingw32-make` — so
+`find_make()` resolves `make`, `gmake`, `mingw32-make` in order rather than
+hardcoding a name the development box does not have.
+
+**Still open at the end of this session:** JG-06 wants the guardrail proof
+at N >= 200 and the committed run reached 10 of 108 requested episodes
+before real Razorpay-side rate limiting tripped its stopping rule. A live
+200-episode run is now possible again, but it creates and cancels up to 200
+real Payment Links against the submission account, and I am not spending
+that quota without deciding it is worth it. Flagged rather than quietly
+downgraded to a fixture run, which would have made the headline
+non-circular metric circular.
+
+`ruff check` clean across `src tests scripts experiments`.

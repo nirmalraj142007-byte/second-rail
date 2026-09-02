@@ -1,0 +1,19 @@
+{
+  "reference_id": "secondrail-probe-qm5wa2zx90",
+  "first_plink_id": "plink_TXDuMI1vmOHMOW",
+  "outcome": "REJECTED — Razorpay refused the duplicate reference_id",
+  "status_code": 400,
+  "response_body": {
+    "error": {
+      "code": "BAD_REQUEST_ERROR",
+      "description": "payment link with given reference_id: secondrail-probe-qm5wa2zx90 already exists. Please create a payment link with a different reference_id",
+      "metadata": [],
+      "reason": null,
+      "source": null,
+      "step": null
+    }
+  },
+  "cancelled": [
+    "plink_TXDuMI1vmOHMOW"
+  ]
+}

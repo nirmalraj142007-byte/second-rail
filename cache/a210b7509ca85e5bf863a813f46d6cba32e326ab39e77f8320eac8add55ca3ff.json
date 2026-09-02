@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-31T22:46:31+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "a210b7509ca85e5bf863a813f46d6cba32e326ab39e77f8320eac8add55ca3ff",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The failure appears to be a customer‑side error; a human can guide the user to resolve it.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re on it and will help you complete it shortly.\"}",
+  "usage": {
+    "input_tokens": 682,
+    "output_tokens": 162
+  }
+}

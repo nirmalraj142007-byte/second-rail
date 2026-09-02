@@ -82,6 +82,8 @@ class RazorpayExecutor:
         audit: object | None = None,
         retry_cap: int = 3,
         retry_delays: list[float] | None = None,
+        on_retry: Any = None,
+        on_retry_exhausted: Any = None,
     ) -> None:
         self._conn = conn
         self._client = client
@@ -92,6 +94,23 @@ class RazorpayExecutor:
         # can be written to the audit record as it happens — see the
         # docstring on _on_attempt() in create_recovery_link().
         self._audit = audit
+        # Optional callable(attempt_number, delay_seconds, status_code), for
+        # src/ui/live.py's LiveRunView.retry() — purely observational, never
+        # consulted for control flow, so leaving it None (every existing
+        # call site) is fully backward compatible.
+        self._on_retry = on_retry
+        # Optional callable(retry_cap), fired exactly once, only when the
+        # cap was genuinely exhausted (not on the "server-side duplicate"
+        # detour, which is a success in disguise, not exhaustion) — see the
+        # `except BackoffError` branch below. This is the ONLY place the
+        # real configured retry_cap is known; LiveRunView.retry_exhausted()
+        # used to guess it from the last announced retry attempt, which is
+        # off by one whenever the failure is due to cap exhaustion (verified
+        # empirically: cap=3 with 3 scripted 429s announces attempts 1 and 2
+        # only, since with_backoff() never backs off before its own last,
+        # failing attempt — attempt 3 raises immediately). This callback
+        # exists so the UI never has to guess.
+        self._on_retry_exhausted = on_retry_exhausted
         # executor_retry_cap / executor_backoff_seconds (config/guardrails.yaml)
         # — never hardcoded here, per the project's money-adjacent-config rule.
         self._retry_cap = retry_cap
@@ -164,9 +183,11 @@ class RazorpayExecutor:
         # audit record as it happens, so the backoff is visible on screen
         # and in evidence/audit/*.jsonl, not hidden inside the client.
         attempts: list[dict[str, Any]] = []
+        last_status: dict[str, int | None] = {"value": None}
 
         def _try_create() -> tuple[int, Any]:
             status_code, body = self._client.create_payment_link_once(payload, ref_id)
+            last_status["value"] = status_code
             return (status_code, body)
 
         def _on_attempt(attempt_num: int, delay_sec: float) -> None:
@@ -183,6 +204,13 @@ class RazorpayExecutor:
                     ),
                     execution={"attempt": attempt_num, "delay_ms": int(delay_sec * 1000)},
                 )
+            if self._on_retry is not None:
+                try:
+                    self._on_retry(attempt_num, delay_sec, last_status["value"])
+                except Exception:
+                    # A UI hook must never be able to break a real retry
+                    # loop — logged, not raised.
+                    logger.warning("on_retry callback raised - ignored", exc_info=True)
             time.sleep(delay_sec)
 
         try:
@@ -237,7 +265,7 @@ class RazorpayExecutor:
                     # crash on either.
                     logger.warning(
                         "idempotency collision recording a server-side duplicate for "
-                        "payment_id=%s — already on file under this key",
+                        "payment_id=%s - already on file under this key",
                         episode.payment_id,
                     )
                 return ExecutionResult(
@@ -253,6 +281,11 @@ class RazorpayExecutor:
                 e.last_status_code,
                 e.last_response_body,
             )
+            if self._on_retry_exhausted is not None:
+                try:
+                    self._on_retry_exhausted(self._retry_cap)
+                except Exception:
+                    logger.warning("on_retry_exhausted callback raised - ignored", exc_info=True)
             try:
                 self._record_execution(
                     conn=self._conn,
@@ -280,13 +313,13 @@ class RazorpayExecutor:
                 # is what this catches.
                 logger.warning(
                     "idempotency collision recording a second failed attempt for "
-                    "payment_id=%s — a prior attempt under the same key is already "
+                    "payment_id=%s - a prior attempt under the same key is already "
                     "on file; this attempt still failed and is still reported as such",
                     episode.payment_id,
                 )
             raise ExecutorError(
                 f"failed to create Payment Link for {episode.payment_id}: "
-                f"HTTP {e.last_status_code} — body: {e.last_response_body!r}",
+                f"HTTP {e.last_status_code} - body: {e.last_response_body!r}",
                 code="PAYMENT_LINK_CREATION_FAILED",
             ) from e
 

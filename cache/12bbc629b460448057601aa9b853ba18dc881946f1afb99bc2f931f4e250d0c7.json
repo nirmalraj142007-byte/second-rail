@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-31T22:44:31+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "12bbc629b460448057601aa9b853ba18dc881946f1afb99bc2f931f4e250d0c7",
+  "response": "{\"chosen_action\":\"link_alt_instrument\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\"],\"rationale\":\"The failure is a BAD_REQUEST_ERROR on a high-value card payment, so offering a new payment link with a different instrument is the best recovery step.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re sending you a new link to complete it quickly.\"}",
+  "usage": {
+    "input_tokens": 718,
+    "output_tokens": 135
+  }
+}

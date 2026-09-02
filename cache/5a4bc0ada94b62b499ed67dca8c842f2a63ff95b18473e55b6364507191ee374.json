@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-31T22:42:07+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "5a4bc0ada94b62b499ed67dca8c842f2a63ff95b18473e55b6364507191ee374",
+  "response": "{\"chosen_action\":\"no_action\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"No recovery action is appropriate for this case.\",\"copy_customer_facing\":\"Your payment did not go through, but we are working on a solution for you.\"}",
+  "usage": {
+    "input_tokens": 684,
+    "output_tokens": 155
+  }
+}

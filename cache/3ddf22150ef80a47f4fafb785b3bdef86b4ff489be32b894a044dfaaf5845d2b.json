@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-31T22:43:55+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "3ddf22150ef80a47f4fafb785b3bdef86b4ff489be32b894a044dfaaf5845d2b",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The error indicates a user input issue; a human can guide the customer to correct it.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re sending a support agent to help you complete it.\"}",
+  "usage": {
+    "input_tokens": 684,
+    "output_tokens": 147
+  }
+}

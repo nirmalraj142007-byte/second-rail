@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T11:26:54+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "c8816ff53160bdad0f6a4b47c63afc5b351767fc1fe635112ea3b6d673c08c25",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\"],\"rationale\":\"High-value UPI payment with a BAD_REQUEST_ERROR suggests a user-side issue that requires human assistance.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re on it and will help you complete it shortly.\"}",
+  "usage": {
+    "input_tokens": 683,
+    "output_tokens": 142
+  }
+}

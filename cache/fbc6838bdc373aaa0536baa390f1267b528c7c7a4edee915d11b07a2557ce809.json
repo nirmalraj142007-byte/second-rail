@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T09:18:22+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "fbc6838bdc373aaa0536baa390f1267b528c7c7a4edee915d11b07a2557ce809",
+  "response": "{\"class_id\":\"C9\",\"confidence\":0.95,\"rationale\":\"error_description indicates the UPI app is not reachable, matching device_or_app_unreachable.\",\"features_used\":[\"error_description\"]}",
+  "usage": {
+    "input_tokens": 1161,
+    "output_tokens": 94
+  }
+}

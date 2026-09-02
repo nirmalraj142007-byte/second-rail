@@ -1,0 +1,14 @@
+/* Mirrors src/ui/theme.py's colour constants exactly — the terminal is the
+   source of truth, this file is a translation, not a second design.
+   tests/test_webui.py asserts these hex values match theme.py's constants
+   byte-for-byte, so this file can never silently drift from the terminal. */
+:root {
+  --cabin: #12161C;        /* ground / panel fill */
+  --chalk: #E8E3D8;        /* primary text */
+  --brass: #B8925A;        /* dividers, borders, headings */
+  --signal-red: #C0392B;   /* fail / hard_refuse */
+  --signal-amber: #D99A2B; /* degraded / human_keystroke countdown */
+  --signal-green: #3FA66D; /* pass / actioned */
+  --telegraph-cyan: #4FB6C4; /* human_keystroke tier */
+  --slate-dim: #5C6773;    /* auto tier / secondary text */
+}

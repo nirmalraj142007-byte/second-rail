@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T09:17:22+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "c07537cebed60ecec7387f40c8920ac1a41902f0cc7ef05bf15750d80ce206ee",
+  "response": "{\"class_id\":\"C5\",\"confidence\":0.95,\"rationale\":\"error_description indicates amount limit exceeded, matching limit_or_attempts_exceeded.\",\"features_used\":[\"error_description\"]}",
+  "usage": {
+    "input_tokens": 1168,
+    "output_tokens": 83
+  }
+}

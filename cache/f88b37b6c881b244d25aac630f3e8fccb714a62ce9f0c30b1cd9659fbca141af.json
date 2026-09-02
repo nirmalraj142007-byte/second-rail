@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T10:18:52+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "f88b37b6c881b244d25aac630f3e8fccb714a62ce9f0c30b1cd9659fbca141af",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The error indicates a user‑side issue that requires human review.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re working on a solution and will reach out soon.\"}",
+  "usage": {
+    "input_tokens": 682,
+    "output_tokens": 150
+  }
+}

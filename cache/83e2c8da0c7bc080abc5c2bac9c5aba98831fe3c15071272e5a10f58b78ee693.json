@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T10:23:04+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "83e2c8da0c7bc080abc5c2bac9c5aba98831fe3c15071272e5a10f58b78ee693",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The error indicates a bad request with no prior contacts, so a human review is needed.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re working on a solution and will get back to you shortly.\"}",
+  "usage": {
+    "input_tokens": 684,
+    "output_tokens": 234
+  }
+}

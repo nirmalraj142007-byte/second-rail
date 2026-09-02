@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T09:17:59+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "6ddf44b427058b7b84002e7182f5b455b30c370e5a4ec4b11c3adaf5e34ef2da",
+  "response": "{\"class_id\":\"C6\",\"confidence\":0.95,\"rationale\":\"error_description indicates the customer declined the payment request on the UPI app.\",\"features_used\":[\"error_description\"]}",
+  "usage": {
+    "input_tokens": 1165,
+    "output_tokens": 101
+  }
+}

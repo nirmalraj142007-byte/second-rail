@@ -235,6 +235,36 @@ def post_net(conn, run_id: str) -> int:
     return net
 
 
+def post_expected_gross(conn, run_id: str, *, amount_paise: int, basis: str) -> None:
+    """Post the base-case *expected-value* gross for an evaluation run.
+
+    `post_gross()` above posts realised recovery — money a real
+    `payment_link.paid` webhook actually confirmed. An eval run over the
+    sealed split has none of that by construction: nobody pays a synthetic
+    link, so the recovery figure is an expected value computed from
+    `outcome_model.md`'s per-episode `response_probability`. Both are still
+    the same ledger `kind`, because they are the same *line item* — what
+    this run believes it recovered — and the report renders them the same
+    way. What separates them is the `basis` string, which the caller must
+    make say plainly which of the two this is; `scripts/eval.py` writes the
+    disclosure there, and `evidence/report.md` section 4 repeats it.
+
+    Splitting them into two kinds was the alternative, and it was worse:
+    `post_net()` would then need to know which kind to subtract from, and
+    "net is computed in exactly one place" is the property that keeps the
+    report from drifting away from the ledger.
+    """
+    insert_ledger_entry(
+        conn,
+        entry_id=str(ULID()),
+        run_id=run_id,
+        episode_id=None,
+        kind="gross_recovery",
+        amount_paise=amount_paise,
+        basis=basis,
+    )
+
+
 def compute_gate_disabled_counterfactual(
     conn, episodes: list[Episode], opted_out: frozenset[str], g: Guardrails
 ) -> FPCost:

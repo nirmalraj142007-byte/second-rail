@@ -1,23 +1,36 @@
 # Where the LLM is not
 
-*First draft — Phase 4. Updated Phase 7: `src/gate/` is now real, and
-`tests/test_llm_boundary.py` is the enforcement mechanism referenced
-throughout this document — it walks `src/gate/`, `src/execute/`,
-`src/attribute/`, `src/audit/`, `src/ingest/`, `src/db/` and fails the
-build if any file in them imports the LLM client module or contains the
-strings `"openai"`, `"genai"`, or `"anthropic"`. `src/execute/` and
-`src/attribute/` don't exist yet — everywhere else I name a path that
-isn't built, I'm naming where the boundary will be enforced once that
-phase lands, per the module map in `CLAUDE.md`.*
+*Complete as of Phase 17, 2 Sep 2026. Every package named below now
+exists, and every "where enforced" line points at code or a test I can run,
+not at a plan. `tests/test_llm_boundary.py` is the mechanism referenced
+throughout: it walks `src/gate/`, `src/execute/`, `src/attribute/`,
+`src/audit/`, `src/ingest/` and `src/db/` and fails the build if any file in
+them imports the LLM client module or contains the strings `"openai"`,
+`"genai"`, or `"anthropic"`.*
 
-Second Rail calls an LLM twice per episode, at most: once to classify a
-cause when the regex baseline doesn't match, once to pick one action from
-an already-narrowed set of at most three. Everywhere else in this system,
-the LLM is refused outright — not "discouraged," refused, with a test that
-greps the package for the client symbol and fails the build if it's there
-(`test_llm_boundary.py`). This document is the list of exactly which
-decisions that refusal covers, and why each one is a decision I don't
-trust a model to make.
+I call an LLM twice per episode, at most: once to classify a cause when the
+regex baseline doesn't match, once to pick one action from an
+already-narrowed set of at most three. Both calls are content-hash cached,
+so a re-run of the same episode costs nothing and returns the same answer.
+That is the entire surface. Everywhere else in this system the model is
+refused outright — not "discouraged," refused, with a test that greps the
+package for the client symbol and fails the build if it's there
+(`test_llm_boundary.py`).
+
+This document is the list of exactly which decisions that refusal covers,
+and why each one is a decision I don't trust a model to make. I wrote it
+because the negative space is the part that shows judgement: everyone can
+show you where they used a model.
+
+A note on how to read the "where enforced" lines. I've tried to distinguish
+three different strengths of guarantee, because they are not the same thing
+and pretending they are would defeat the point of the document:
+
+- **Structural** — the capability does not exist in the codebase at all
+  (there is no payout call to gate).
+- **Tested** — a named test fails if the boundary is crossed.
+- **Conventional** — the code is written this way and nothing automated
+  stops someone changing it. I say so where that's the case.
 
 ## Amount computation
 
@@ -187,6 +200,155 @@ logs it and records it on the `Selection` rather than crashing — an
 interesting finding for the report, not a failure mode this project treats
 as adversarial the way it treats an inadmissible `chosen_action` (see
 "Action outside the admissible set" above).
+
+## The idempotency key, and whether to retry
+
+**Decision refused:** what the idempotency key for an execution is, and
+whether a failed Payment Link call gets another attempt.
+
+**Why the model is kept out:** the key is
+`sha256(payment_id + ':' + policy_rule_id)[:32]` — a pure function of two
+stable identifiers, deliberately *not* the webhook event id, because the
+same payment generates multiple deliveries under different event ids and I
+lost a session to that (see `BUILD_LOG.md`). A key a model derived would be
+a key that could differ between two runs of the same episode, which is the
+same thing as having no key: it is used as both the Payment Link's
+`reference_id` and a SQLite `UNIQUE` constraint, and Razorpay itself
+rejects a duplicate `reference_id` with a 400 — confirmed against the live
+API on 2 Sep 2026, `evidence/razorpay_field_report.md` Step 5. Retry is the
+same argument one level up: attempt count and backoff delay come from
+`config/guardrails.yaml` and are written into the audit record
+individually, so a judge can read what was attempted and when. A model
+deciding "this one deserves one more go" would make that record fiction.
+
+**Where enforced (tested):** `src/execute/idempotency.py` computes the key;
+`tests/test_executor.py` asserts stability across runs
+(`test_idempotency_key_matches_between_runs`) and that a second attempt
+creates no link (`test_duplicate_suppression`). Backoff lives in
+`src/execute/retry.py`, hand-rolled rather than `tenacity` precisely so each
+attempt and delay is an explicit line in the audit record.
+
+## Whether to stop the run
+
+**Decision refused:** whether a batch halts — on consecutive executor
+errors, on a cap breach, on a shared-cause cluster above threshold, or on
+the kill-switch file being present.
+
+**Why the model is kept out:** a stopping rule exists to bound damage when
+something upstream is already wrong, and the model is one of the things
+that could be wrong. A halt condition that consults the same class of
+component it is supposed to protect against is decorative. These are also
+the rules a panel is most likely to ask me to demonstrate firing, and "it
+fired because the model judged the situation had deteriorated" is not a
+demonstration.
+
+**Where enforced (tested):** `src/gate/stopping.py`, as integer comparisons
+against `config/guardrails.yaml`; every stop writes a `stage="stop"` audit
+record naming which rule fired, and `tests/test_failure_paths.py` exercises
+them. The cluster threshold is the one number here with an experiment
+behind it — `experiments/thresholds/outage_cluster.md`.
+
+## Which escalation tier an episode lands in
+
+**Decision refused:** whether an episode is `auto`, `human_keystroke`, or
+`hard_refuse`, and the named reason recorded for that assignment.
+
+**Why the model is kept out:** this is the decision that determines whether
+a human being is asked to press a key before a money-adjacent action is
+taken. It is a comparison of `amount_paise` against
+`auto_approve_ceiling_paise`, and of the running contact count against
+`batch_contact_ceiling` — both config values the selection prompt is
+specifically never shown. If the model could influence its own tier, it
+could route its own choice around the human gate, which inverts the entire
+control.
+
+**Where enforced (tested):** `src/gate/engine.py`'s `_compute_tier()` and
+the `TierReason` constants; the tier and its named reason are written to
+every gate audit record. `tests/test_choose.py` renders a real selection
+prompt against the real `config/` files and asserts it contains none of
+`"5000"`, `"ceiling"`, `"cap"`, `"quiet"`, `"threshold"`, the raw amount, or
+any `config/guardrails.yaml` key — the model cannot reason about a
+threshold it is never told.
+
+## Webhook authenticity and deduplication
+
+**Decision refused:** whether an inbound webhook is genuine, whether it has
+been seen before, and whether it arrived out of order.
+
+**Why the model is kept out:** signature verification is an HMAC
+comparison. There is no interpretation in it, and a model in that path
+would add latency to the one endpoint with a hard sub-50ms budget while
+making a security boundary probabilistic. Dedup is a `UNIQUE` constraint on
+`payment_id`; ordering is a lookup for a prior `payment.failed`. All three
+have exactly one right answer.
+
+**Where enforced (tested):** `src/ingest/signature.py` and
+`src/ingest/service.py`; `tests/test_ingest.py` covers a valid signature, a
+replayed event id, the same payment arriving under a different event id,
+and a `payment.captured` with no prior failure — recorded `out_of_order`
+with no recovery episode created.
+
+## The sealed split
+
+**Decision refused:** which episodes are sealed, and whether the seal is
+intact.
+
+**Why the model is kept out:** the seal is a sha256 over
+`holdout/sealed.jsonl`, committed before the eval harness existed. Its
+entire value is that it is mechanical and checkable by someone who has no
+reason to trust me. `scripts/holdout_guard.py` goes further and refuses to
+let `holdout/labels.jsonl` be opened before the pipeline has finished — the
+agent never reads outcome labels, and that is a code-level guard rather
+than a promise in a README.
+
+**Where enforced (tested):** `make verify-seal`;
+`tests/test_holdout_guard.py`.
+
+## What the model *is* allowed to do, stated plainly
+
+Two things, and I want them on the same page as the refusals so the balance
+is visible:
+
+1. **Classify.** Map a heterogeneous issuer error string onto one of nine
+   canonical causes, with a confidence and a one-line rationale. The regex
+   baseline runs first and resolves most of them for free; only the
+   unmatched tail reaches the model. `evidence/report.md` section 3 reports
+   where this loses, including the top five error families by volume where
+   free regex ties it at 100%.
+2. **Select.** Pick one action from an admissible set of at most three that
+   the policy table has already fixed, naming the features it used.
+
+Both are language and pattern work over an input that has already been
+validated, and neither can widen its own options. Everything downstream of
+the selection — whether it is permitted, what it costs, whether it
+executes, whether it worked — is deterministic.
+
+## The closing argument
+
+Every line in this document is a place I could have reached for the model
+and chose not to, and each refusal cost me something concrete: the policy
+table is 27 hand-written rules instead of a prompt, the taxonomy is
+anchored to 20 harvested strings instead of nine I invented, and the tier
+logic is two integer comparisons where a model could have been more
+nuanced.
+
+I think that trade is right, and my reason is narrower than "LLMs are
+unreliable." It is that this system's only defensible claim is its audit
+trail. Every reported number has to be re-derivable from persisted rows by
+someone who does not trust me — that is what the hash chain, the
+pre-registered outcome model and the sealed split are all for. A decision a
+model made is not re-derivable. It is reproducible only in the weak sense
+that the same prompt tends to give the same answer, and I cache the
+responses precisely because "tends to" is not good enough. The moment a
+model touches a cap, an amount, or an attribution, the audit log stops
+being a record of what the system did and becomes a transcript of what it
+said it did.
+
+So the boundary is not drawn around what the model does badly. It is drawn
+around what has to stay checkable. That is why `src/diagnose/` and
+`src/choose/` are the only two packages on the model's side of it, and why
+`tests/test_llm_boundary.py` fails the build rather than logging a warning
+if that ever stops being true.
 
 ## Anything that moves money
 

@@ -54,3 +54,22 @@ docs page as of 2026-08-25.
 
 This *is* the documented "30 Payment Links per business" test-mode cap after all — the Step 5 inference above (favoring a time-windowed limit instead, based on cancelling not freeing capacity) was wrong. Cancelling a link removes it from the *payable* set but apparently does not free a slot against the creation cap; the cap counts links ever created, not links currently open. This account's cap was already exhausted by the Phase 1 harvest work (forcing checkout failures via the mock bank necessarily creates Payment Links/orders along the way), so no new real Payment Link can be created on it until Razorpay resets the cap — no documented reset window was found; flagged in `LIMITATIONS.md`. The reference_id duplicate-rejection probe (400 on a repeated `reference_id`) remains unconfirmed empirically for the same reason: it requires a successful creation to duplicate against, and this account cannot create one right now. `src/execute/executor.py` implements the documented 400 behavior defensively (treats it identically to local dedup, per Razorpay's own Payment Links error-list documentation) but that code path is untested against the live API — see `BUILD_LOG.md`'s Phase 8 entry for the full account of chasing this down.
 
+**Update, Phase 17, 2 Sep 2026 — the probe finally ran, and the documented behaviour is now the confirmed behaviour.** The account creates Payment Links again (77 already on file, a fresh create returned HTTP 200, cancel returned `cancelled`), so the probe that had been blocked since Phase 8 could execute for real. Both attempts used the same `reference_id`; the first created a link, the second was refused:
+
+- reference_id used: `secondrail-probe-qm5wa2zx90`
+- **Result: REJECTED — Razorpay refused the duplicate reference_id**
+- HTTP status on the second attempt: `400`
+- response body:
+
+```json
+{"error": {"code": "BAD_REQUEST_ERROR", "description": "payment link with given reference_id: secondrail-probe-qm5wa2zx90 already exists. Please create a payment link with a different reference_id", "metadata": [], "reason": null, "source": null, "step": null}}
+```
+
+- links cancelled afterwards: `plink_TXDuMI1vmOHMOW` (the second was never created, so there was nothing else to cancel)
+
+Machine-readable result: `evidence/harvest_probe_result.json`.
+
+**Implication for `src/execute/`:** Razorpay enforces `reference_id` uniqueness server-side at creation time, so handing the idempotency key straight to `reference_id` means a second execution attempt with the same key is rejected by Razorpay itself — the 400 path `RazorpayExecutor.create_recovery_link` had implemented defensively from the docs is now verified against the live API rather than assumed. The local SQLite `UNIQUE` constraint on `idempotency_key` is still load-bearing, because it short-circuits *before* the call is made at all; server-side rejection is the second line, not the first. Note the exact wording differs from Razorpay's published error list (`payment link creation with reference ID already attempted`) — another small doc-drift finding, of the same kind as the `order_id` one in Step 2.
+
+**On the 30-link cap:** the paragraph above this one is left exactly as written on 27 Aug because it was true then and the wrong turn is part of the record. It is no longer current. `LIMITATIONS.md` carries the current state and the re-verification that established it.
+

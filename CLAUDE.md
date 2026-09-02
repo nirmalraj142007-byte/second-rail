@@ -61,7 +61,7 @@ make eval                # offline: fixtures + committed LLM cache, no network, 
 make demo                # Rich live stream; --execute required for real Razorpay calls, default dry-run
 make approve              # approval queue for human-tier episodes
 make rollback RUN_ID=X   # cancels every link a run created, prints a per-link result table
-make verify-audit        # walks the hash chain, must print "chain intact — N records" in <2s
+make verify-audit        # walks the hash chain, must print "chain intact - N records" in <2s (ASCII hyphen, not an em-dash — see KNOWN_ISSUES.md Issue 2)
 make harvest              # one-time D2 job: forces real Razorpay test-mode failures into evidence/harvested_errors.jsonl
 ```
 

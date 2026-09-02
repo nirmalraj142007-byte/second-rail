@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T10:16:04+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "6243e3d58af1e9bd6232663bb14ee6ad599c6682be55bb81ed0236eeb0311cac",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\"],\"rationale\":\"The error indicates a user‑side issue that may need human assistance.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re sending a support ticket to help you complete it.\"}",
+  "usage": {
+    "input_tokens": 683,
+    "output_tokens": 143
+  }
+}

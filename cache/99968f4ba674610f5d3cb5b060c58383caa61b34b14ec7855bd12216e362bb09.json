@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T11:11:06+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "99968f4ba674610f5d3cb5b060c58383caa61b34b14ec7855bd12216e362bb09",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The failure is a BAD_REQUEST_ERROR with no prior contacts, so a human review is needed.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re sending a support agent to help you complete it.\"}",
+  "usage": {
+    "input_tokens": 684,
+    "output_tokens": 166
+  }
+}

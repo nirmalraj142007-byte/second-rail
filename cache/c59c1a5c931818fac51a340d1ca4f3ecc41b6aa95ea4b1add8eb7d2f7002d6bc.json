@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-31T22:45:55+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "c59c1a5c931818fac51a340d1ca4f3ecc41b6aa95ea4b1add8eb7d2f7002d6bc",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The failure is a customer‑side error with no prior contacts, so a human review is appropriate.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re working on a solution and will reach out soon.\"}",
+  "usage": {
+    "input_tokens": 682,
+    "output_tokens": 152
+  }
+}

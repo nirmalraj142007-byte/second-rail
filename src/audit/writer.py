@@ -58,6 +58,7 @@ _OPTIONAL_FIELD_DEFAULTS: dict[str, Any] = {
     "llm": None,
     "rationale": None,
     "escalation_tier": None,
+    "escalation_reason": None,
     "guardrail_checks": (),
     "approval": None,
     "execution": None,

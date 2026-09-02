@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T10:23:16+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "a0df90b49c2ab63c9554bd531a7d91db1417c19942ee7d607fb0e939b3264c2c",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The error indicates a user‑side issue; escalation to support is appropriate.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re working on a solution and will reach out soon.\"}",
+  "usage": {
+    "input_tokens": 684,
+    "output_tokens": 160
+  }
+}

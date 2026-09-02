@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T09:16:46+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "95c6b342dbe607aaf75fefae576431a82844c991900aef77f6885e380c3c4e82",
+  "response": "{\"class_id\":\"C4\",\"confidence\":0.8,\"rationale\":\"error_description indicates incorrect OTP or verification details, pointing to authentication failure.\",\"features_used\":[\"error_description\"]}",
+  "usage": {
+    "input_tokens": 1171,
+    "output_tokens": 92
+  }
+}

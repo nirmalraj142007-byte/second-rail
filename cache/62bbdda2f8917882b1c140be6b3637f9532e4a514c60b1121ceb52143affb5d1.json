@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-31T22:44:43+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "62bbdda2f8917882b1c140be6b3637f9532e4a514c60b1121ceb52143affb5d1",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The failure is a user‑initiated error with no prior contacts, so a human review is appropriate.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re on it and will help you complete it shortly.\"}",
+  "usage": {
+    "input_tokens": 682,
+    "output_tokens": 143
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-31T22:35:11+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "a0be45a0267de8b961b54f0224924c151e6e22f8330d3995947245f85049fd51",
+  "response": "{\"chosen_action\":\"link_alt_instrument\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The failure is likely due to a temporary card issue; offering a new payment link gives the customer another chance to complete the transaction.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’ve sent you a new link to complete it quickly.\"}",
+  "usage": {
+    "input_tokens": 718,
+    "output_tokens": 146
+  }
+}

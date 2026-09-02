@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T11:05:42+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "74ba82b47a944181ce6c24d34314ad81f95b1374d6ea738586854130d9284b2c",
+  "response": "{\"chosen_action\":\"open_ticket\",\"features_used\":[\"error_code\",\"amount_band\",\"segment\",\"instrument\",\"prior_contacts_7d\",\"hours_since_failure\"],\"rationale\":\"The error indicates a client-side issue; escalation to support is appropriate.\",\"copy_customer_facing\":\"Your payment didn’t go through, but we’re on it and will help you complete it shortly.\"}",
+  "usage": {
+    "input_tokens": 683,
+    "output_tokens": 145
+  }
+}

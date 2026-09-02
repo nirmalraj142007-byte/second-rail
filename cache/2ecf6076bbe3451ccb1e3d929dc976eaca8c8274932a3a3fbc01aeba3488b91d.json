@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-08-30T09:25:10+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "2ecf6076bbe3451ccb1e3d929dc976eaca8c8274932a3a3fbc01aeba3488b91d",
+  "response": "{\"class_id\":\"C3\",\"confidence\":0.95,\"rationale\":\"error_reason is card_number_invalid, indicating a data-entry problem.\",\"features_used\":[\"error_reason\"]}",
+  "usage": {
+    "input_tokens": 1156,
+    "output_tokens": 86
+  }
+}
