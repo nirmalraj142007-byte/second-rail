@@ -772,28 +772,27 @@ class Runner:
 # ---------------------------------------------------------------------------
 
 
-def select_gate_eligible_slice(
+def _iter_gate_eligible(
     conn,
-    episodes: Iterable[Episode],
+    episode_list: list[Episode],
     g: Guardrails,
     opted_out: frozenset[str],
-    n: int,
     *,
     now: datetime | None = None,
+    stop_after: int | None = None,
 ) -> list[Episode]:
-    """Deterministically pick the first `n` gate-eligible episodes from
-    `episodes`, in source order, simulating the same cumulative RunState a
-    real `Runner.run()` over exactly that slice would build (amount/
-    frequency caps accumulate only over the episodes actually selected,
-    matching what a later `Runner.run(selected_slice)` will itself
-    accumulate). Used by the fault-injection demo scripts so a fixed
-    episode count lines up with the same real payment_ids on every take —
-    this never inserts anything into `conn`, it only reads (check_duplicate,
-    opt-out lookups), so it is safe to call before `Runner.run()`.
+    """Shared core of `select_gate_eligible_slice()` and
+    `count_gate_eligible_episodes()`: walk `episode_list` in source order,
+    simulating the same cumulative RunState a real `Runner.run()` over
+    exactly the episodes accepted so far would build (amount/frequency caps
+    accumulate only over episodes actually selected). Stops early once
+    `stop_after` acceptances are found, or walks the whole list if it is
+    None. Never inserts anything into `conn` — it only reads
+    (check_duplicate, opt-out lookups) — so it is safe to call before
+    `Runner.run()`.
     """
     gate = GateEngine()
     state = RunState()
-    episode_list = list(episodes)
     cluster_membership = compute_cluster_membership(episode_list, g.outage_cluster_threshold)
     selected: list[Episode] = []
     for ep in episode_list:
@@ -812,14 +811,51 @@ def select_gate_eligible_slice(
             state.total_eligible_contacts_this_run += 1
             if ep.customer_id:
                 state.contacts_by_customer.setdefault(ep.customer_id, []).append(ep.failed_at)
-            if len(selected) == n:
+            if stop_after is not None and len(selected) == stop_after:
                 break
+    return selected
+
+
+def select_gate_eligible_slice(
+    conn,
+    episodes: Iterable[Episode],
+    g: Guardrails,
+    opted_out: frozenset[str],
+    n: int,
+    *,
+    now: datetime | None = None,
+) -> list[Episode]:
+    """Deterministically pick the first `n` gate-eligible episodes from
+    `episodes`, in source order. Used by the fault-injection demo scripts so
+    a fixed episode count lines up with the same real payment_ids on every
+    take. Raises if fewer than `n` gate-eligible episodes exist in the
+    source data at all — see `count_gate_eligible_episodes()` to find out
+    how many exist before asking for a specific count.
+    """
+    selected = _iter_gate_eligible(conn, list(episodes), g, opted_out, now=now, stop_after=n)
     if len(selected) < n:
         raise RuntimeError(
             f"only found {len(selected)} gate-eligible episode(s) in the source data, "
             f"need {n} — the fault-injection demo requires a fixed, deterministic slice"
         )
     return selected
+
+
+def count_gate_eligible_episodes(
+    conn,
+    episodes: Iterable[Episode],
+    g: Guardrails,
+    opted_out: frozenset[str],
+    *,
+    now: datetime | None = None,
+) -> int:
+    """How many gate-eligible episodes exist in `episodes` in total — the
+    ceiling `select_gate_eligible_slice()` can ever satisfy from this same
+    source. Used to report that ceiling honestly (e.g. "N is capped at 108
+    by the number of gate-eligible episodes in data/train.jsonl") rather
+    than letting a reader assume a smaller-than-requested N was an arbitrary
+    partial sample."""
+    return len(_iter_gate_eligible(conn, list(episodes), g, opted_out, now=now))
 
 
 def load_episodes(paths: Iterable[Path]) -> list[Episode]:

@@ -67,6 +67,7 @@ from src.choose.selector import ActionSelector
 from src.config import Settings, load_settings, require_razorpay
 from src.config_models import ConfigBundle, config_hash, load_all
 from src.db.migrate import get_connection, migrate
+from src.db.repo import get_opted_out_customer_ids
 from src.diagnose.baseline import RegexBaseline
 from src.diagnose.cache import DiskCache
 from src.diagnose.classifier import Diagnoser, Diagnosis
@@ -106,7 +107,13 @@ from src.report.sensitivity import (
     SweepInputs,
     sweep_recovery,
 )
-from src.runner import Runner, RunSummary, load_and_upsert_customers, load_episodes
+from src.runner import (
+    Runner,
+    RunSummary,
+    count_gate_eligible_episodes,
+    load_and_upsert_customers,
+    load_episodes,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 ROOT = Path(__file__).resolve().parent.parent
@@ -116,6 +123,12 @@ CUSTOMERS_PATH = ROOT / "data" / "customers.jsonl"
 FIXTURE_DIR = ROOT / "fixtures" / "payment_links"
 SR_DB_PATH = ROOT / "evidence" / "eval_second_rail.db"
 BASELINE_DB_PATH = ROOT / "evidence" / "eval_baseline.db"
+# Same source scripts/guardrail_proof.py draws its episode slice from — kept
+# as a separate constant here (rather than imported from that module) so
+# this file never has to import a script that shells out to a live executor
+# just to read one path.
+GUARDRAIL_PROOF_TRAIN_SOURCE = ROOT / "data" / "train.jsonl"
+GATE_CEILING_DB_PATH = ROOT / "evidence" / "eval_gate_ceiling.db"
 REPORT_PATH = ROOT / "evidence" / "report.md"
 METRICS_PATH = ROOT / "evidence" / "eval_metrics.json"
 GUARDRAIL_PROOF_PATH = ROOT / "evidence" / "guardrail_proof.json"
@@ -145,6 +158,28 @@ def _reset_db(path: Path) -> None:
         p = Path(str(path) + suffix)
         if p.exists():
             p.unlink()
+
+
+def _train_gate_eligible_ceiling(bundle: ConfigBundle) -> int:
+    """How many gate-eligible episodes exist in data/train.jsonl in total —
+    the real ceiling `make guardrail-proof N=<n>` can ever satisfy. Computed
+    fresh from the same source file and the same guardrails every eval run,
+    never hardcoded, so the report's ceiling sentence stays true even if
+    data/train.jsonl or config/guardrails.yaml later change what that ceiling
+    is. Uses a throwaway database — count_gate_eligible_episodes() only
+    reads (duplicate/opt-out lookups), so a freshly migrated, empty DB is the
+    correct baseline, matching what scripts/guardrail_proof.py itself starts
+    from."""
+    _reset_db(GATE_CEILING_DB_PATH)
+    migrate(GATE_CEILING_DB_PATH)
+    conn = get_connection(GATE_CEILING_DB_PATH)
+    try:
+        load_and_upsert_customers(conn, CUSTOMERS_PATH)
+        opted_out = get_opted_out_customer_ids(conn)
+        episodes = load_episodes([GUARDRAIL_PROOF_TRAIN_SOURCE])
+        return count_gate_eligible_episodes(conn, episodes, bundle.guardrails, opted_out)
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -720,6 +755,12 @@ def main(
             processed_count=gp.get("processed_count"),
             stopped_reason=gp.get("stopped_reason"),
             consecutive_error_tolerance=gp.get("consecutive_error_tolerance"),
+            # Computed fresh from data/train.jsonl below, not read out of
+            # guardrail_proof.json itself (that file predates this field and
+            # a report renderer should not trust a number a past run of a
+            # different script happened to write down).
+            gate_eligible_ceiling=_train_gate_eligible_ceiling(bundle),
+            gate_eligible_source="data/train.jsonl",
         )
 
     # cost_paise is deliberately 0 on a cache hit (src/diagnose/classifier.py,

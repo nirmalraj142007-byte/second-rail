@@ -92,6 +92,13 @@ class GuardrailProof:
     processed_count: int | None = None
     stopped_reason: str | None = None
     consecutive_error_tolerance: int | None = None
+    # How many gate-eligible episodes exist in `gate_eligible_source` in
+    # total, computed fresh every eval run (see scripts/eval.py's
+    # _train_gate_eligible_ceiling) rather than read out of
+    # guardrail_proof.json — that keeps the ceiling honest even if the
+    # source data changes after guardrail_proof.json was last written.
+    gate_eligible_ceiling: int | None = None
+    gate_eligible_source: str | None = None
 
 
 @dataclass
@@ -298,6 +305,19 @@ def _render_section1(s: Section1) -> list[str]:
         ]
     else:
         lines += [f"Read from `{g.source_path}` — the real N={g.n} run ({g.mode})."]
+        if g.gate_eligible_ceiling is not None and g.gate_eligible_source is not None:
+            if g.n == g.gate_eligible_ceiling:
+                lines.append(
+                    f"N is capped at {g.gate_eligible_ceiling} by the number of "
+                    f"gate-eligible episodes in `{g.gate_eligible_source}`; this is the "
+                    "full available set, not a partial sample."
+                )
+            elif g.n < g.gate_eligible_ceiling:
+                lines.append(
+                    f"{g.gate_eligible_ceiling} gate-eligible episodes exist in "
+                    f"`{g.gate_eligible_source}` — this run asked for {g.n}, a deliberate "
+                    "subset of the full available set, not its ceiling."
+                )
         if g.consecutive_error_tolerance is not None:
             lines.append(
                 f"This tool's own consecutive-executor-error tolerance was raised to "

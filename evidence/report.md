@@ -1,5 +1,5 @@
 # Second Rail — Results
-Run `01M1HDW2WY0D7097JGRFD5NNBR` · `0e7c526` · config `9e22c9aa673f…` · 2026-09-02T21:35:26+05:30
+Run `01M1HFCGP0EVKTQVFARXX580V8` · `c7ff53b` · config `9e22c9aa673f…` · 2026-09-02T22:01:56+05:30
 Sealed split: sha256 verified — 200 episodes (see `holdout/SEAL.sha256`) · shift: BANK_E is reserved for the sealed split only.
 
 Attribution rule AR-01, window 48h.
@@ -11,6 +11,7 @@ Nothing in this section depends on the outcome model in `outcome_model.md` — e
 ### Guardrail correctness under fault injection
 
 Read from `evidence/guardrail_proof.json` — the real N=108 run (live).
+N is capped at 108 by the number of gate-eligible episodes in `data/train.jsonl`; this is the full available set, not a partial sample.
 This tool's own consecutive-executor-error tolerance was raised to 5 for this run (from the shared production default of 3 in `config/guardrails.yaml`, which stays unchanged) — sustained real-API calls at volume produce sporadic Razorpay-side rate-limiting that isn't a systemic failure signal for a tool whose whole job is deliberately hammering the real API; see BUILD_LOG.md.
 Stopping rule `consecutive_executor_errors` fired this run — only 10/108 requested episodes were actually reached; every metric below is real, just over a smaller N than requested.
 **Real + fixture, stated plainly, not rounded up:** 10 real, live-verified test-mode Payment Link creation(s) back this proof — the other 98 requested episodes were never attempted in this run at all, live or fixture (this tool has no mid-run real-to-fixture handoff). Separately, and independently of this proof, `make eval`'s sealed-split evaluation exercises the full 200-episode batch through `FixtureExecutor` — synthesized responses, not real captured ones (no fixture file exists per episode), and not re-verified against the live API. The two are complementary, not the same measurement: this table is real-API-verified correctness at a real, if small, N=10; the sealed-split figures elsewhere in this report are full-batch behavioural coverage with no live network calls.
@@ -23,7 +24,7 @@ Stopping rule `consecutive_executor_errors` fired this run — only 10/108 reque
 | idempotency collisions correctly detected | 10/10 | — |
 | links created and cancelled | 5 | every link this proof created |
 
-5 link(s) on the real Razorpay API carry notes.run_id='01M1E9KZGGD75A0DB1YP7H14P7', vs 5 distinct idempotency key(s) recorded locally
+5 link(s) on the real Razorpay API carry notes.run_id='01M1HEV5580ZXWYFJ11DJA50EQ', vs 5 distinct idempotency key(s) recorded locally
 
 ### Action admissibility rate
 
@@ -35,7 +36,7 @@ Stopping rule fired this run: `cap_breach` — the batch was 200 episodes, 131 w
 
 ### Throughput and LLM cost
 
-Throughput: 1327.3 episodes/min over 131 of 200 sealed episodes processed.
+Throughput: 1310.0 episodes/min over 131 of 200 sealed episodes processed.
 
 LLM cost this run (cache-aware, 0 paise on every cache hit): Rs 0.00 (measured), Rs 0.00 (measured) per 100 episodes.
 
