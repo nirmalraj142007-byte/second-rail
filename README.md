@@ -11,6 +11,8 @@ make eval           # sealed-split evaluation -> evidence/report.md, ~20s, no ke
 make verify-audit   # walks the hash chain, prints "chain intact - N records"
 ```
 
+**Windows, no plain `make` on PATH?** Substitute `mingw32-make` for `make` in every command above and below — confirmed working end to end (`mingw32-make setup && mingw32-make eval && mingw32-make verify-audit`) via `make clean-clone-test`, a fresh isolated clone, not this working tree. `scripts/judge_check.py`'s `find_make()` and `scripts/clean_clone_test.sh` already do this substitution automatically, trying `make`, `gmake`, then `mingw32-make` in that order. No `make`-family binary at all: `winget install GnuWin32.Make`.
+
 ## What it does
 
 One episode, end to end — eight stages, plus the audit chain every one of them writes into as it goes:
@@ -28,7 +30,13 @@ A model choosing between payment-recovery options with no fence around it can so
 
 That is the pipeline's *shape*, not a claim that a live `payment.failed` webhook runs straight through it today. The webhook endpoint's own job stops at ingest — signature verification, dedup, normalization, nothing else, deliberately, so an LLM call or a Razorpay outage can never make that endpoint itself slow or unavailable (`src/ingest/app.py`'s module docstring). Gate through attribute run in batch mode, against already-ingested episodes (`make eval`, `make demo`), not inline per-webhook. See [docs/out-of-scope.md](docs/out-of-scope.md)'s "Real-time webhook-to-pipeline processing" entry, below, for why, and what would have to change first.
 
-**On positioning.** Razorpay already ships payment links, Optimizer, Intelligent Payment Retry and abandoned-checkout recovery, and merchants run their own retry emails — this is not an empty category. The seam this project owns is narrower: **automated per-episode diagnosis driving a bounded, gated, audited action** for failures that land after the session is gone. Razorpay's own Optimizer launch material states that nearly 33% of failed transactions are never re-attempted — that is their figure and their claim, cited as such, not a number measured here.
+**On positioning.** Razorpay already ships payment links, Optimizer, Intelligent Payment Retry and abandoned-checkout recovery, and merchants run their own retry emails — I am not claiming an empty category. The seam this project owns is narrower: **automated per-episode diagnosis driving a bounded, gated, audited action** for failures that land after the session is gone. Razorpay's own Optimizer launch material states that nearly 33% of failed transactions are never re-attempted — that is their figure and their claim, cited as such, not a number measured here.
+
+## No code path in Second Rail moves money
+
+This is the design's spine, so it is a heading and not a sentence buried in a paragraph.
+
+The only external effect this system can produce is a **cancellable Razorpay Payment Link** with `expire_by` set, which the customer authenticates themselves. There is no debit, no refund, no payout, no transfer, no auto-capture — not gated behind a flag, not implemented and disabled. Those API calls do not exist in `src/`; `grep -rn 'payouts\|transfers\|\.capture(' src/` returns nothing beyond the Razorpay Payments API's own `payment_id` capture-status field. `make rollback RUN_ID=x` cancels every link a run created and prints a per-link result table. Default mode is `--dry-run`; real Razorpay calls require an explicit `--execute`. This endpoint whitelist is enforced by [tests/test_claims.py](tests/test_claims.py).
 
 ## Results
 
@@ -36,7 +44,7 @@ Full detail, including the confusion matrix and the exception list, is in **[evi
 
 Sealed split: sha256-verified, 200 episodes (`holdout/SEAL.sha256`). Shift: `BANK_E` is reserved for the sealed split only — it never appears in `data/train.jsonl`. Attribution rule AR-01, window 48h (pre-registered in [outcome_model.md](outcome_model.md) §3).
 
-The ordering below is deliberate. The numbers that did not pass through a model written for this project come first.
+The ordering below is deliberate. The numbers that did not pass through a model I wrote come first.
 
 ### 1. Non-circular — measured against real API responses and real counts
 
@@ -69,13 +77,7 @@ On the harvested strings — the hardest and most externally-anchored data in th
 
 **NET Rs 51,482 – Rs 95,580** across the 200-episode sealed split (99/108 gate-eligible episodes contacted before `cap_breach` fired), against a `FIXED_RETRY_AT_T30` baseline of **NET Rs 51,412 – Rs 95,449** (102/102 gate-eligible episodes contacted), net of false-positive cost, as a range under a ±30% sweep of three pre-registered parameters: response probability, attribution window (a structural no-op in this expected-value method — see `src/report/sensitivity.py`), and the goodwill proxy.
 
-Read that number sceptically. It passes through a customer-response model written specifically for this project, pre-registered in [outcome_model.md](outcome_model.md) before any eval ran (`git log` confirms the timestamps). The sweep perturbs self-authored parameters and widens a band around a quantity that was invented, not measured. It is disclosure, not evidence. Sections 1–3 are the evidence.
-
-## No code path in Second Rail moves money
-
-This is the design's spine, so it is a heading and not a sentence buried in a paragraph.
-
-The only external effect this system can produce is a **cancellable Razorpay Payment Link** with `expire_by` set, which the customer authenticates themselves. There is no debit, no refund, no payout, no transfer, no auto-capture — not gated behind a flag, not implemented and disabled. Those API calls do not exist in `src/`; `grep -rn 'payouts\|transfers\|\.capture(' src/` returns nothing beyond the Razorpay Payments API's own `payment_id` capture-status field. `make rollback RUN_ID=x` cancels every link a run created and prints a per-link result table. Default mode is `--dry-run`; real Razorpay calls require an explicit `--execute`. This endpoint whitelist is enforced by [tests/test_claims.py](tests/test_claims.py).
+Read that number sceptically. It passes through a customer-response model I wrote, pre-registered in [outcome_model.md](outcome_model.md) before any eval ran (`git log` confirms the timestamps). The sweep perturbs my own parameters and widens a band around a quantity I invented. It is disclosure, not evidence. Sections 1–3 are the evidence.
 
 ## Where the LLM is and is not
 
@@ -83,7 +85,7 @@ The model does exactly two things per episode, both content-hash cached: classif
 
 It never computes an amount, evaluates a cap, decides eligibility or quiet hours, determines attribution, produces any reported metric, or chooses an action outside the policy table's admissible set. `src/gate/`, `src/execute/`, `src/attribute/`, `src/audit/`, `src/ingest/` and `src/db/` are enforced LLM-free by [tests/test_llm_boundary.py](tests/test_llm_boundary.py).
 
-The full list, with the enforcing test named against each refusal, is in **[docs/where-the-llm-is-not.md](docs/where-the-llm-is-not.md)**.
+The full list, with the enforcing test named against each refusal, is in **[docs/where-the-llm-is-not.md](docs/where-the-llm-is-not.md)** — it is the document I would read first if I were reviewing this repo.
 
 ## Guardrails
 
@@ -133,12 +135,10 @@ Every exclusion below has its reason attached. A bare list of things not built r
 
 **Not permitted — regulatory, not preferential**
 
-| exclusion | reason |
-|---|---|
-| Mandates, subscriptions, e-NACH, UPI Autopay | NPCI mandate retry rules govern permitted retry counts and timing; inventing a cadence would be the part a payments engineer checks first. Second Rail never touches an episode originating from a mandate. |
-| Real SMS or WhatsApp sending | TRAI's TCCCP regulations require DLT registration (headers, pre-approved templates) for commercial messaging in India. Second Rail sets Razorpay Payment Link's own `notify.sms`/`notify.email` flags in test mode and claims nothing beyond that; any SMS cost quoted in the report is a *stated assumption* from `outcome_model.md`, not a bill paid. |
-| Storing, displaying, or logging a card PAN | RBI card-tokenisation norms. Second Rail never sees a PAN — the Razorpay `payment` object doesn't include one, and nothing in `src/` reads, writes, renders, or logs a card number; the synthetic generator doesn't produce one either. |
-| Any real PII | The Digital Personal Data Protection Act, 2023. Every customer, payment, contact detail and episode is synthetic, generated by the committed seeded generator at `data/generator.py`. |
+- **Mandates, subscriptions, e-NACH, UPI Autopay.** NPCI mandate retry rules govern permitted retry counts and timing, and I do not have them right — inventing a cadence would be the part a payments engineer checks first. Second Rail never touches an episode originating from a mandate.
+- **Real SMS or WhatsApp sending.** TRAI's TCCCP regulations require DLT registration — headers, pre-approved templates — for commercial messaging in India. I have neither, so I am not going to describe test-mode plumbing as a messaging system. Second Rail sets Razorpay Payment Link's own `notify.sms`/`notify.email` flags in test mode and claims nothing beyond that; any SMS cost quoted in the report is a *stated assumption* from `outcome_model.md`, not a bill I paid.
+- **Storing, displaying, or logging a card PAN.** RBI card-tokenisation norms. Second Rail never sees a PAN — the Razorpay `payment` object doesn't include one, and nothing in `src/` reads, writes, renders, or logs a card number; the synthetic generator doesn't produce one either.
+- **Any real PII.** The Digital Personal Data Protection Act, 2023. Every customer, payment, contact detail and episode is synthetic, generated by the committed seeded generator at `data/generator.py`.
 
 **Chose not to — it belongs to someone else, or it would corrupt the evidence**
 
@@ -183,9 +183,9 @@ Stack: Python 3.11, FastAPI, Pydantic 2.9, SQLite (WAL), Typer, Rich, matplotlib
 
 ## Build notes
 
-[BUILD_LOG.md](BUILD_LOG.md) has one entry per working session from day one, including a `## Wrong turns` index at the top pointing at every place the first hypothesis was wrong.
+[BUILD_LOG.md](BUILD_LOG.md) has one entry per working session from day one, including a `## Wrong turns` index at the top pointing at every place my first hypothesis was wrong. There are ten of them. The one I would lead with: I spent a session certain my dedup logic was broken, and it was the tunnel re-delivering on reconnect — which is why the idempotency key is derived from `payment_id` and never from the webhook event id.
 
-[KNOWN_ISSUES.md](KNOWN_ISSUES.md) carries the defects found and not yet closed, rather than the ones fixed quietly.
+[KNOWN_ISSUES.md](KNOWN_ISSUES.md) carries the defects I found and have not yet closed, rather than the ones fixed quietly.
 
 ## How to check this in 90 seconds
 
@@ -218,4 +218,4 @@ make guardrail-proof N=200                       # real Payment Link creations u
 
 ---
 
-*Not legal advice. The compliance items named above and in [LIMITATIONS.md](LIMITATIONS.md) and [docs/out-of-scope.md](docs/out-of-scope.md) — DPDP Act 2023, TRAI DLT, RBI tokenisation, NPCI mandate retry rules — are flagged because they are load-bearing for what this project claims, not because this constitutes a compliance review. Anything shipped for real needs counsel.*
+*I am not a lawyer, and none of this is legal advice. The compliance items named above and in [LIMITATIONS.md](LIMITATIONS.md) and [docs/out-of-scope.md](docs/out-of-scope.md) — DPDP Act 2023, TRAI DLT, RBI tokenisation, NPCI mandate retry rules — are flagged because they are load-bearing for what this project claims, not because this constitutes a compliance review. Anything shipped for real needs counsel.*

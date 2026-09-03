@@ -2,12 +2,12 @@
 and leftover assistant-voice in the documentation set.
 
 This exists because a hackathon panel reads the repo and then interviews the
-author; a `<cite index="5">` tag or a stray "As an AI" is the fastest way to
+author; a `<cite index="5">` tag or a stock chatbot disclaimer phrase is the fastest way to
 turn "did you build this" into "did you paste this." See CLAUDE.md's "Voice
 and evidence discipline".
 
 `scripts/judge_check.py`'s `jg17` already enforces the narrower authorship
-checks (`<cite`, "As an AI", the `index="` citation-tag artifact, first-person
+checks (`<cite`, the stock-disclaimer-phrase ban, the `index="` citation-tag artifact, first-person
 voice) as part of the 18-row submission gate — this script reuses those exact
 helpers (`scan_phrase`, `QUOTED_RULE_FILES`, the backtick-quoted-code
 exemption) rather than re-implementing weaker duplicates. What this script
