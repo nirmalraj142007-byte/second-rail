@@ -99,6 +99,31 @@ and would add a subsystem I could not test under load. What streaming *would*
 require is documented in [scaling-failures.md](scaling-failures.md) §1 rather
 than hand-waved.
 
+### Real-time webhook-to-pipeline processing
+
+**Reason: the ingest endpoint's job is fast, reliable webhook receipt and
+episode creation — signature verification, dedup, normalization — and
+deliberately nothing else.** `src/ingest/app.py`'s own module docstring
+states the design directly: `POST /webhooks/razorpay` "does the absolute
+minimum work before returning 200" and hands everything else to a
+background worker over an in-process queue, specifically "to keep this
+endpoint under the 50ms target." Diagnosis, policy resolution, and
+execution are not on that request path at all — they run in batch mode,
+against episodes already sitting in `data/train.jsonl` / `holdout/sealed.jsonl`
+(`make eval`, `make demo`), never inline per-webhook. This is a deliberate
+consequence of the same design choice: an LLM call or a Razorpay outage
+mid-request would otherwise be able to make the webhook endpoint itself
+slow or unavailable, and a slow or unavailable webhook endpoint is what
+causes Razorpay's own retry queue to back up — the one failure mode this
+project cannot afford at the one boundary it does not control. Stated
+plainly because CLAUDE.md's own architecture diagram (and the same diagram
+in README.md) draws `webhook -> ingest -> gate -> diagnose -> choose ->
+execute -> attribute` as one continuous arrow, which is the pipeline's
+logical shape, not a claim that a live `payment.failed` webhook triggers
+gate/diagnose/choose/execute automatically. It does not, at any volume —
+see [scaling-failures.md](scaling-failures.md) §1 for what a durable queue
+would still need before that connection could exist safely.
+
 ### An A/B testing framework
 
 **Reason: there is no live traffic to split.** Both arms would be draws from

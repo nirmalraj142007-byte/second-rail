@@ -78,6 +78,23 @@ against. Phase 17 could, and did: see `evidence/razorpay_field_report.md`
 Step 5.
 
 
+## A live webhook is ingested, not processed
+
+`src/ingest/` verifies the signature, dedups on `payment_id`, normalizes the
+payload, and writes an `episode` row — nothing more, by design (see that
+package's own module docstring on the 50ms endpoint target). It does not
+hand that episode to gate/diagnose/choose/execute. Every demo, eval, and
+guardrail-proof run in this repo (`make demo`, `make eval`,
+`scripts/failure_demo.py`, `scripts/guardrail_proof.py`) sources its
+episodes from `data/train.jsonl` / `holdout/sealed.jsonl` — batch replay,
+never a live `payment.failed` webhook. See
+[docs/out-of-scope.md](docs/out-of-scope.md)'s "Real-time
+webhook-to-pipeline processing" entry for the reasoning. The *outcome* side
+of the loop is real and wired the other way: a genuinely created Payment
+Link's `payment_link.paid` webhook does flow through `src/ingest/` into
+`src/attribute/`'s `OutcomeWatcher` — it is specifically the
+`payment.failed` -> gate trigger that is not connected.
+
 ## What breaks at 10k episodes/day (design-level, not yet load-tested)
 
 Not yet validated under load; named here as known architectural limits, to

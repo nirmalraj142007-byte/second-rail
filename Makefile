@@ -12,7 +12,7 @@ else
 	PIP := $(VENV_BIN)/pip
 endif
 
-.PHONY: setup doctor lint test clean data seal verify-seal eval demo approve demo-states verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve webui tunnel replay-webhooks gate-run failure-demo failure-demo-backup guardrail-proof classify choose-run watch thresholds judge-check
+.PHONY: setup doctor lint test test-live clean data seal verify-seal eval demo approve demo-states verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve webui tunnel replay-webhooks gate-run failure-demo failure-demo-backup guardrail-proof classify choose-run watch thresholds judge-check
 
 setup:
 	$(PYTHON311) -m venv .venv
@@ -25,11 +25,28 @@ doctor:
 lint:
 	$(PY) -m ruff check src tests scripts experiments
 
+# Default suite a judge runs on a clean clone: hermetic, no network, no key,
+# excludes only @pytest.mark.live (tests/test_executor.py's real Payment
+# Link round-trip and any other test that needs RAZORPAY_KEY_ID/SECRET).
+# Coverage for src/gate, src/execute, src/audit is printed explicitly below
+# the main run — the three packages CLAUDE.md's non-negotiables bind
+# hardest (no LLM, the idempotency boundary, the hash chain).
 test:
-	$(PY) -m pytest -q
+	$(PY) -m pytest -m "not live" --cov=src --cov-report=term-missing -q
+	@echo ""
+	@echo "Coverage -- the three packages CLAUDE.md's non-negotiables bind hardest:"
+	@$(PY) -m coverage report --include="src/gate/*"    | tail -1 | sed 's/^TOTAL/gate:   /'
+	@$(PY) -m coverage report --include="src/execute/*" | tail -1 | sed 's/^TOTAL/execute:/'
+	@$(PY) -m coverage report --include="src/audit/*"   | tail -1 | sed 's/^TOTAL/audit:  /'
+
+# The one test in the suite that needs real Razorpay test-mode credentials
+# and touches the network (RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET in .env) —
+# never part of `make test`, run explicitly and separately.
+test-live:
+	$(PY) -m pytest -m live -q
 
 clean:
-	rm -rf .venv .pytest_cache .ruff_cache second_rail.db second_rail.db-wal second_rail.db-shm
+	rm -rf .venv .pytest_cache .ruff_cache .coverage second_rail.db second_rail.db-wal second_rail.db-shm
 	rm -f cache/*.json
 	find . -name '__pycache__' -type d -prune -exec rm -rf {} +
 

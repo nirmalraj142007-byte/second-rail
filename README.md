@@ -20,6 +20,8 @@ The only external effect this system can produce is a **cancellable Razorpay Pay
 
 One episode, end to end: webhook -> ingest (dedup on `payment_id`) -> gate (7 ordered checks, each audited) -> diagnose (regex first, unmatched tail to an LLM) -> choose (a policy table constrains the set, the model picks 1 of at most 3) -> gate again -> approval queue if the episode is above the auto-approve ceiling -> execute (idempotent Payment Link) -> hash-chained audit -> outcome listener -> attribute -> report.
 
+That is the pipeline's shape, not a claim that a live `payment.failed` webhook runs straight through it today. The webhook endpoint's own job stops at ingest — signature verification, dedup, normalization, nothing else, deliberately, so an LLM call or a Razorpay outage can never make that endpoint itself slow or unavailable (`src/ingest/app.py`'s module docstring). Gate through attribute run in batch mode, against already-ingested episodes (`make eval`, `make demo`), not inline per-webhook. See [docs/out-of-scope.md](docs/out-of-scope.md)'s "Real-time webhook-to-pipeline processing" entry for why, and what would have to change first.
+
 **On positioning.** Razorpay already ships payment links, Optimizer, Intelligent Payment Retry and abandoned-checkout recovery, and merchants run their own retry emails. I am not claiming an empty category. The seam this project owns is narrower: **automated per-episode diagnosis driving a bounded, gated, audited action** for failures that land after the session is gone. Razorpay's own Optimizer launch material states that nearly 33% of failed transactions are never re-attempted — that is their figure and their claim, cited as such, not a number I measured.
 
 ## Results
@@ -140,6 +142,8 @@ payment.failed webhook
         v
   [ audit ]   append-only JSONL, every record hash-chained to the previous   NO LLM
 ```
+
+The arrow from `[ ingest ]` to `[ gate ]` is the pipeline's logical shape, not today's wiring: ingest stops at dedup + normalization, and gate-through-attribute runs as a batch pass over already-ingested episodes, not inline off the same request. See "What it does" above.
 
 Stack: Python 3.11, FastAPI, Pydantic 2.9, SQLite (WAL), Typer, Rich, matplotlib, raw `httpx` for Payment Links so the request and response land in the audit record verbatim. No queue, no auth provider, no cloud deploy, no Docker, no CI — each a deliberate cut, listed with its reason in [docs/out-of-scope.md](docs/out-of-scope.md).
 

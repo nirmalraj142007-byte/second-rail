@@ -21,8 +21,6 @@ known-first-party = ["src", "scripts", "data", "experiments"]
 "scripts/demo.py" = ["B008"]
 "src/ui/approve.py" = ["B008"]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-markers = [
-    "live: requires real Razorpay test-mode credentials, hits the network",
-]
+# pytest config lives in pytest.ini, not here — pytest.ini takes precedence
+# over [tool.pytest.ini_options] whenever both exist, so a section here
+# would silently stop being read rather than merge with it.

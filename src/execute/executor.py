@@ -404,7 +404,14 @@ class RazorpayExecutor:
             "currency": "INR",
             "description": f"Recovery for failed payment {episode.payment_id[:20]}...",
             "customer": {
-                "name": f"Customer {episode.customer_id[:8]}",
+                # A live-ingested episode always has customer_id=None (see
+                # src/ingest/service.py — dedup happens on payment_id, not
+                # a customer record) — never assume the batch-replay case
+                # (a real customer_id from data/generator.py) is the only
+                # one this ever sees.
+                "name": (
+                    f"Customer {episode.customer_id[:8]}" if episode.customer_id else "Customer"
+                ),
                 "contact": None,  # Synthetic only, no real phone
                 "email": None,  # Synthetic only, no real email
             },

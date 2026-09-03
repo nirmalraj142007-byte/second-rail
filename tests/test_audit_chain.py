@@ -4,6 +4,8 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 from src.audit.verify import verify_chain
 from src.audit.writer import AuditWriter, canonical_json
 from src.db.migrate import get_connection, migrate
@@ -85,7 +87,12 @@ def test_reordered_lines_are_detected(tmp_path):
     assert not result.intact
 
 
+@pytest.mark.slow
 def test_2000_records_verify_in_under_two_seconds(tmp_path):
+    # The 2.0s budget below is verify_chain()'s own elapsed_s, not this
+    # test's wall time — writing 2000 records first (each AuditWriter.append()
+    # fsyncs its line, real disk I/O by design, see writer.py's module
+    # docstring) is what makes this test itself take several seconds.
     writer = _make_writer(tmp_path)
     for i in range(2000):
         writer.append(stage="gate", actor="system", rationale=f"r{i}")

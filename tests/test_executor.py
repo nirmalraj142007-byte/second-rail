@@ -249,6 +249,41 @@ class TestRazorpayExecutor:
         # Client was never called
         mock_client.create_payment_link_once.assert_not_called()
 
+    def test_customer_id_none_does_not_crash_in_dry_run_or_execute(
+        self, temp_db: tuple[Path, sqlite3.Connection], sample_episode: Episode
+    ) -> None:
+        """A live-ingested episode always has customer_id=None (see
+        src/ingest/service.py's insert_episode call) — _build_link_payload()
+        used to slice episode.customer_id unconditionally, crashing with
+        TypeError on both modes. Regression test for that fix."""
+        _, conn = temp_db
+        episode = sample_episode.model_copy(update={"customer_id": None})
+        _seed_run_and_episode(conn, episode)
+
+        dry_run_client = Mock()
+        dry_run_client.create_payment_link_once.side_effect = AssertionError(
+            "dry-run must never touch the network"
+        )
+        dry_run_result = RazorpayExecutor(
+            conn=conn, client=dry_run_client, mode="dry_run", run_id="run_001",
+        ).create_recovery_link(
+            episode=episode, action="link_upi_alt", policy_rule_id="P-14", run_id="run_001",
+        )
+        assert dry_run_result.status == "created"
+
+        execute_client = Mock()
+        execute_client.create_payment_link_once.return_value = (
+            200,
+            {"id": "plink_no_customer", "short_url": "https://rzp.io/l/no_customer"},
+        )
+        execute_result = RazorpayExecutor(
+            conn=conn, client=execute_client, mode="execute", run_id="run_001",
+        ).create_recovery_link(
+            episode=episode, action="link_upi_alt", policy_rule_id="P-15", run_id="run_001",
+        )
+        assert execute_result.status == "created"
+        assert execute_result.plink_id == "plink_no_customer"
+
     def test_duplicate_suppression(
         self, temp_db: tuple[Path, sqlite3.Connection], sample_episode: Episode
     ) -> None:
