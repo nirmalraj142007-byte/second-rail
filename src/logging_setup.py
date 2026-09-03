@@ -10,11 +10,34 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 IST = timezone(timedelta(hours=5, minutes=30))
+
+# Defense in depth, not the primary control: no code path in src/ is
+# supposed to log a key, a full webhook body, or a contact value in the
+# first place (see src/ingest/app.py's module docstring — only a sha256
+# hash and already-extracted routing fields ever reach a log line). This
+# redacts anything matching these shapes anyway, so a future log statement
+# that slips up doesn't leak a live credential into stderr / captured CI
+# output. Key patterns mirror scripts/scrub_cache.py's; the email pattern
+# additionally covers a stray customer contact value.
+_REDACT_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"rzp_(live|test)_[A-Za-z0-9]+"),
+    re.compile(r"sk-[A-Za-z0-9]{20,}"),
+    re.compile(r"AIza[A-Za-z0-9_-]{30,}"),
+    re.compile(r"gsk_[A-Za-z0-9]{20,}"),
+    re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
+]
+
+
+def _redact(text: str) -> str:
+    for pattern in _REDACT_PATTERNS:
+        text = pattern.sub("[REDACTED]", text)
+    return text
 
 
 class JSONFormatter(logging.Formatter):
@@ -25,13 +48,13 @@ class JSONFormatter(logging.Formatter):
             "stage": getattr(record, "stage", "unknown"),
             "run_id": getattr(record, "run_id", None),
             "episode_id": getattr(record, "episode_id", None),
-            "msg": record.getMessage(),
+            "msg": _redact(record.getMessage()),
         }
         code = getattr(record, "code", None)
         if code is not None:
             payload["code"] = code
         if record.exc_info:
-            payload["exc_info"] = self.formatException(record.exc_info)
+            payload["exc_info"] = _redact(self.formatException(record.exc_info))
         return json.dumps(payload, ensure_ascii=False)
 
 

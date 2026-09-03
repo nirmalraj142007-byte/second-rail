@@ -12,11 +12,11 @@ else
 	PIP := $(VENV_BIN)/pip
 endif
 
-.PHONY: setup doctor lint test test-live clean data seal verify-seal eval demo approve demo-states verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve webui tunnel replay-webhooks gate-run failure-demo failure-demo-backup guardrail-proof classify choose-run watch thresholds judge-check
+.PHONY: setup doctor lint test test-live clean data seal verify-seal eval demo approve demo-states verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve webui tunnel replay-webhooks gate-run failure-demo failure-demo-backup guardrail-proof classify choose-run watch thresholds judge-check secrets-audit dep-audit clean-clone-test scrub-cache
 
 setup:
 	$(PYTHON311) -m venv .venv
-	$(PIP) install --upgrade pip
+	$(PY) -m pip install --upgrade pip
 	$(PIP) install -r requirements.txt -r requirements-dev.txt
 
 doctor:
@@ -115,8 +115,13 @@ harvest:
 migrate:
 	$(PY) -m src.db.migrate
 
+# --no-server-header drops the "Server: uvicorn" response header (uvicorn
+# only appends it when the app's own response has none, so the flag is the
+# whole fix -- see src/ingest/app.py's module docstring). This endpoint is
+# meant to be reachable only through `make tunnel`'s cloudflared quick
+# tunnel during a demo, never bound to a public interface directly.
 serve:
-	$(PY) -m uvicorn src.ingest.app:app --port 8000
+	$(PY) -m uvicorn src.ingest.app:app --port 8000 --no-server-header
 
 # Read-only companion dashboard (src/webui/) — a second window into the
 # same run, not a replacement for `make demo`'s terminal. Binds to
@@ -211,3 +216,43 @@ guardrail-proof:
 # attribution this pass resolved, then gross/fp/net.
 watch:
 	$(PY) -m scripts.watch --run-id $(RUN_ID) $(if $(POLL),--poll)
+
+# Proves no secret ever entered git history or the working tree: greps
+# `git log -p --all` and the tracked tree for key-shaped strings across
+# every provider named in CLAUDE.md, and checks .env is gitignored and was
+# never committed. Exits 1 with the offending commit/file on any finding —
+# see scripts/secrets_audit.sh's own comment on why that stops the script
+# rather than trying to fix anything.
+secrets-audit:
+	bash scripts/secrets_audit.sh
+
+# Re-checks cache/*.json (the committed LLM response cache) for API keys,
+# absolute paths from this machine, or real identifiers before it's staged.
+scrub-cache:
+	$(PY) scripts/scrub_cache.py
+
+# pip-audit against the pinned requirement set. Any advisory that can't be
+# fixed by a version bump must be logged in LIMITATIONS.md with the reason,
+# not silently ignored -- the two --ignore-vuln entries below are exactly
+# the two documented there ("make dep-audit (pip-audit): two advisories left
+# unfixed on purpose"): click's fix breaks typer's argument parsing, and
+# starlette's fix needs a fastapi jump too large to requalify before D9.
+# A NEW advisory on any other package still fails this target.
+dep-audit:
+	$(PY) -m pip_audit -r requirements.txt -r requirements-dev.txt \
+		--ignore-vuln PYSEC-2026-2132 \
+		--ignore-vuln PYSEC-2026-161 --ignore-vuln PYSEC-2026-249 \
+		--ignore-vuln PYSEC-2026-248 --ignore-vuln PYSEC-2026-1942 \
+		--ignore-vuln PYSEC-2026-1941 --ignore-vuln PYSEC-2026-2281 \
+		--ignore-vuln PYSEC-2026-2280
+
+# Clones this repo (from the local .git dir, so it works offline) into a
+# fresh temp dir, builds a venv from scratch, and runs the judge's own
+# path (`make setup && make eval && make verify-audit && make judge-check`)
+# with HOME redirected and every RAZORPAY_*/LLM_API_KEY var explicitly
+# unset -- so it cannot accidentally succeed by reusing this machine's
+# credentials or venv. Fails if the whole thing takes over 5 minutes or if
+# the regenerated evidence/report.md disagrees with the committed one on
+# any metric that's supposed to be deterministic.
+clean-clone-test:
+	bash scripts/clean_clone_test.sh

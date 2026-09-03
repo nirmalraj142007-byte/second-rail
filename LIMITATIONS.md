@@ -270,3 +270,45 @@ limit eases (it may be tied to a rolling window, not a hard cap — not
 confirmed either way), a re-run of `make guardrail-proof N=108` could
 reach further; this has not been retried repeatedly to avoid adding to
 the same cumulative volume causing the throttling in the first place.
+
+## `make dep-audit` (pip-audit): two advisories left unfixed on purpose
+
+`pip-audit -r requirements.txt -r requirements-dev.txt` originally reported
+9 known vulnerabilities across `click`, `pytest`, and `starlette`. One was
+fixed; two were investigated and deliberately left as-is rather than bumped
+blind, because a version bump that breaks the CLI or the webhook receiver a
+week before D9 freeze is a worse outcome than a documented advisory.
+
+- **`pytest` 8.3.4 -> 9.0.3 (PYSEC-2026-1845): fixed.** Dev-only dependency;
+  the full suite (`make test`, coverage included) was re-run against 9.0.3
+  before pinning it and passes identically (188 passed, same coverage
+  numbers) — see the version pinned in `requirements-dev.txt`.
+
+- **`click` 8.1.7 (PYSEC-2026-2132, fixed in 8.3.3): NOT bumped.** Tried it —
+  `pip install click==8.3.3` installs cleanly (no resolver conflict, `typer`
+  0.12.5 doesn't pin an upper bound), but it breaks argument parsing: `typer`
+  0.12.5's `Path`-typed `--source` options start reading as "unexpected
+  extra argument" under click 8.3.3, and `tests/test_claims.py::
+  test_cli_with_no_flag_makes_zero_http_posts` plus
+  `tests/test_webui.py::test_web_decide_matches_cli_decide_audit_shape` both
+  fail as a result (confirmed by running the suite with 8.3.3 installed,
+  then reverting). The real fix is upgrading `typer` itself — 0.27.2 is
+  current against 0.12.5 here — which is a 15-minor-version jump across a
+  CLI library every `make` target in this project shells into
+  (`src/runner.py`, `scripts/*`, `src/ui/approve.py`, `src/config.py`), and
+  isn't something to requalify for the first time this close to freeze.
+  Reverted to `click==8.1.7`.
+
+- **`starlette` 0.41.3 (six advisories: PYSEC-2026-161/249/248/1942/1941/
+  2281/2280, fixed across 0.47.2 through 1.3.1): NOT bumped.** `starlette`
+  is pulled in transitively by `fastapi==0.115.6`, which pins it in the
+  0.40.x-0.41.x range — closing every advisory needs `starlette>=1.3.1`,
+  which needs a `fastapi` version well past 0.115 (fastapi has shipped
+  0.116 through 0.141 since). `fastapi` sits directly under
+  `src/ingest/app.py`, the one public network surface this project has;
+  a jump that large risks routing/validation behavior changes with no time
+  before D9 to requalify the webhook receiver end to end. Left pinned.
+
+Both are genuine open items, not swept under a passing `make dep-audit` —
+the target's own output (reproduced above) still shows them, and this
+section is that output's explanation.

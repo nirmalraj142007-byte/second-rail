@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -133,6 +134,66 @@ def test_malformed_missing_error_code_routes_to_exception_entry_not_500(monkeypa
         assert exceptions[0]["stage"] == "ingest"
         assert exceptions[0]["reason_code"] == "SCHEMA_DRIFT_FIELD_MISSING"
         conn.close()
+
+
+def test_oversized_body_returns_413_and_writes_nothing(monkeypatch, tmp_path):
+    db_path = _setup_env(monkeypatch, tmp_path)
+    with TestClient(app) as client:
+        oversized = b'{"pad": "' + b"a" * (256 * 1024 + 1) + b'"}'
+        response = client.post(
+            "/webhooks/razorpay",
+            content=oversized,
+            headers={
+                "Content-Type": "application/json",
+                "X-Razorpay-Signature": _sign(oversized),
+                "X-Razorpay-Event-Id": "evt_big",
+            },
+        )
+        drain()
+        assert response.status_code == 413
+        assert response.json() == {"error": "payload_too_large"}
+
+        conn = get_connection(db_path)
+        assert conn.execute("SELECT COUNT(*) AS n FROM episode").fetchone()["n"] == 0
+        assert conn.execute("SELECT COUNT(*) AS n FROM webhook_event").fetchone()["n"] == 0
+        conn.close()
+
+
+def test_non_json_content_type_returns_400_and_writes_nothing(monkeypatch, tmp_path):
+    db_path = _setup_env(monkeypatch, tmp_path)
+    with TestClient(app) as client:
+        body = (FIXTURES / "payment_failed.json").read_bytes()
+        response = client.post(
+            "/webhooks/razorpay",
+            content=body,
+            headers={
+                "Content-Type": "text/plain",
+                "X-Razorpay-Signature": _sign(body),
+                "X-Razorpay-Event-Id": "evt_wrong_type",
+            },
+        )
+        drain()
+        assert response.status_code == 400
+        assert response.json() == {"error": "unsupported_content_type"}
+
+        conn = get_connection(db_path)
+        assert conn.execute("SELECT COUNT(*) AS n FROM episode").fetchone()["n"] == 0
+        assert conn.execute("SELECT COUNT(*) AS n FROM webhook_event").fetchone()["n"] == 0
+        conn.close()
+
+
+def test_signature_comparison_is_constant_time(monkeypatch, tmp_path):
+    # Not a timing measurement (too flaky in CI) -- asserts the actual
+    # comparison call site uses hmac.compare_digest rather than `==`, which
+    # is the property that makes it constant-time. See
+    # src/ingest/signature.py's module docstring for why this matters.
+    import inspect
+
+    from src.ingest import signature as signature_module
+
+    source = inspect.getsource(signature_module.verify_signature)
+    assert "hmac.compare_digest" in source
+    assert re.search(r"expected\s*==\s*header_signature", source) is None
 
 
 def test_health_ok(monkeypatch, tmp_path):

@@ -7,6 +7,21 @@ minimum work before returning 200: parse the envelope enough to find
 background worker thread over an in-process queue. That is what keeps this
 endpoint under the 50ms target — dedup, normalization, and the DB writes in
 src/ingest/service.py all happen off the request path.
+
+This is the one public network surface this project has, and it is meant to
+be reachable only through `make tunnel`'s cloudflared quick tunnel during a
+demo — not bound to a public interface directly. Hardening on the request
+path, in the order applied: reject a body over `MAX_BODY_BYTES` with 413
+(checked against `Content-Length` before the body is read, and again
+against the actual byte count in case that header lied or was absent);
+reject a non-`application/json` `Content-Type` with 400; verify the HMAC
+signature in constant time (`hmac.compare_digest` in
+src/ingest/signature.py); require `X-Razorpay-Event-Id`; parse JSON.
+Nothing from the request body is ever reflected back in a response or a log
+line — only its sha256 hash and fields already extracted for routing
+(`event`, `payment_id`) appear in either. `make serve` additionally passes
+uvicorn's `--no-server-header` so responses don't advertise the exact
+uvicorn build running behind the tunnel.
 """
 
 from __future__ import annotations
@@ -34,6 +49,12 @@ from src.logging_setup import get_logger, setup_logging
 _logger = get_logger("ingest.app", stage="ingest")
 
 _SHUTDOWN = object()
+
+# Every real Razorpay payment.failed payload is a few KB; 256KB is a wide
+# margin over that, not a tuned production limit — it exists so a client
+# can't force this endpoint to buffer an unbounded body in memory before
+# signature verification ever runs.
+MAX_BODY_BYTES = 256 * 1024
 
 
 def _worker(settings: Settings, work_queue: queue.Queue[dict[str, Any] | object]) -> None:
@@ -123,7 +144,20 @@ async def health() -> dict[str, Any]:
 
 @app.post("/webhooks/razorpay")
 async def receive_webhook(request: Request) -> JSONResponse:
+    content_length = request.headers.get("content-length")
+    if content_length is not None and content_length.isdigit() and int(content_length) > MAX_BODY_BYTES:
+        return JSONResponse(status_code=413, content={"error": "payload_too_large"})
+
+    content_type = request.headers.get("content-type", "")
+    if content_type.split(";", 1)[0].strip().lower() != "application/json":
+        return JSONResponse(status_code=400, content={"error": "unsupported_content_type"})
+
     raw_body = await request.body()
+    # Content-Length can lie or be absent (chunked transfer) -- the actual
+    # byte count read is the check that actually matters.
+    if len(raw_body) > MAX_BODY_BYTES:
+        return JSONResponse(status_code=413, content={"error": "payload_too_large"})
+
     settings: Settings = app.state.settings
     header_signature = request.headers.get("x-razorpay-signature", "")
 
