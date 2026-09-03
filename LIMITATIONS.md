@@ -4,6 +4,51 @@ What is simulated, what is assumed, and what breaks at scale. Kept honest and
 updated as each phase surfaces a new one — see `BUILD_LOG.md` for the session
 each entry came from.
 
+## What is assumed
+
+Every number below is a named assumption in [outcome_model.md](outcome_model.md),
+never a measurement. Full reasoning for each is there; this is the index.
+
+- **Response probability** (§2) — for each `(cause_class, segment, amount_band)`
+  triple, a formula: `base_rate[cause_class] × segment_multiplier[segment] ×
+  amount_decay[amount_band]`, clipped to [0.02, 0.95]. Base rates run from
+  0.70 (`payment_timed_out`, purest transient cause) down to 0.20
+  (`customer_abandoned`, intent-related). No cell is measured against real
+  customer behaviour — every cell is this formula's output.
+- **Attribution window: 48 hours** (§3) — chosen because it sits inside the
+  72-hour episode-age cap and covers a full weekend gap, not fit to any
+  observed `payment_link.paid` latency distribution (none existed to fit).
+- **False-positive cost: ₹0.20 SMS (quoted, not assumed) + ₹15 goodwill
+  (ASSUMPTION)** (§4) — the goodwill figure has no survey, support-ticket, or
+  churn data behind it; it is a named guess, sized so it can't on its own flip
+  a net-positive batch to net-negative but still makes a high-false-positive
+  policy visibly lose money in the report.
+- **The response-probability ordering across segments** (first-time <
+  repeat < high-value) reflects a plausible-sounding design choice, not
+  anything derived from a dataset.
+
+`outcome_model.md` §5 states plainly what this model cannot tell you; §6 is
+its amendment policy — the file is never edited in place, only appended to,
+so its git history shows the real sequence of assumptions.
+
+## What this does not measure
+
+From `evidence/report.md` §7, generated fresh each `make eval` run — this is
+the state of that section as of the run this file was last touched:
+
+- Real customer behaviour — every response is a simulated draw from
+  `outcome_model.md`'s formula, not an actual person deciding whether to pay.
+- Generalisation beyond the seeded distribution shift — `BANK_E` and the 11
+  reserved harvested error strings are the only shift this split carries; a
+  real issuer's traffic could differ in ways the generator never modelled.
+- Anything at production volume — 200 episodes in one batch, not a sustained
+  10k/day load; see "What breaks at 10k episodes/day" below.
+- Partial payments — a customer paying less than the link amount is recorded
+  `not_recovered` by AR-01, even though the merchant did receive some money.
+- Recoveries through channels this run did not create — a payment that later
+  shows as paid through a different link or a different channel entirely is
+  never claimed as this system's recovery.
+
 ## Razorpay test-mode account: the 30 Payment Link cap is not an active constraint
 
 **Current state, re-verified 2 Sep 2026: the 30-link cap does not bind this

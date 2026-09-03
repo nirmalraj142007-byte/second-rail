@@ -12,7 +12,7 @@ else
 	PIP := $(VENV_BIN)/pip
 endif
 
-.PHONY: setup doctor lint test test-live clean data seal verify-seal eval demo approve demo-states verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve webui tunnel replay-webhooks gate-run failure-demo failure-demo-backup guardrail-proof classify choose-run watch thresholds judge-check secrets-audit dep-audit clean-clone-test scrub-cache
+.PHONY: setup doctor lint test test-live clean data seal verify-seal eval demo approve demo-states verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve webui tunnel replay-webhooks gate-run failure-demo failure-demo-backup guardrail-proof classify choose-run watch thresholds judge-check secrets-audit dep-audit clean-clone-test scrub-cache artifact-scan check-architecture judge-quickstart
 
 setup:
 	$(PYTHON311) -m venv .venv
@@ -256,3 +256,28 @@ dep-audit:
 # any metric that's supposed to be deterministic.
 clean-clone-test:
 	bash scripts/clean_clone_test.sh
+
+# Phase 19 — fails on any drafting artifact, placeholder, or leftover
+# assistant-voice string in the documentation set (README.md, LIMITATIONS.md,
+# KNOWN_ISSUES.md, BUILD_LOG.md, outcome_model.md, docs/*.md), plus <cite,
+# "As an AI", and [WRITE THIS YOURSELF] across the whole repo. Reuses
+# scripts/judge_check.py's jg17 authorship-check machinery (scan_phrase,
+# QUOTED_RULE_FILES, the backtick-quoted-code exemption) rather than
+# duplicating a weaker version of it. Expected to FAIL until every
+# [WRITE THIS YOURSELF] marker in README.md has been replaced with real prose
+# — that failure list is the writing checklist, not a bug.
+artifact-scan:
+	$(PY) scripts/artifact_scan.py
+
+# Asserts every module the architecture diagram (scripts/gen_architecture.py)
+# names actually exists under src/ -- a diagram that has drifted from the
+# code is worse than none. Regenerate the PNG with
+# `$(PY) scripts/gen_architecture.py` after editing the STAGES list.
+check-architecture:
+	$(PY) scripts/check_architecture.py
+
+# Prints the exact acceptance sequence a reviewer runs, with the expected
+# outcome of each step on the right. Same content as README.md's "How to
+# check this in 90 seconds" section.
+judge-quickstart:
+	$(PY) scripts/judge_quickstart.py
