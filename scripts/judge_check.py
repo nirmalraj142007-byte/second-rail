@@ -39,6 +39,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -770,53 +771,85 @@ def jg12() -> tuple[bool, str]:
 
 
 JG13_TESTS = (
-    "tests/test_executor.py::TestRazorpayExecutor::test_idempotency_key_matches_between_runs",
     "tests/test_ingest.py::test_same_payment_id_different_event_id_is_duplicate",
     "tests/test_ingest.py::test_captured_with_no_prior_failed_is_out_of_order",
+    "tests/e2e/test_failure_path.py::test_retry_exhaustion_is_accounted_and_a_rerun_is_a_true_no_op",
 )
 
 
 def jg13(*, skip_slow: bool) -> tuple[bool, str]:
-    """Idempotency, dedup and out-of-order: tested, and visible in the log."""
-    problems: list[str] = []
+    """Idempotency, dedup and out-of-order: tested, and visible in the log.
 
+    Reads the audit records these specific tests just wrote, under a
+    `--basetemp` this function controls, rather than scanning the real
+    evidence/audit/ directory. evidence/audit/*.jsonl is per-run working
+    output and deliberately gitignored except a small committed sample
+    (see .gitignore's own comment) -- on a freshly cloned repo it starts
+    essentially empty, so a version of this check that reads it directly
+    only ever "passed" here by scavenging whatever this developer machine's
+    own accumulated history happened to contain, which proves nothing about
+    the repo itself. scripts/clean_clone_test.sh caught this the first time
+    it ran make judge-check against a real fresh clone. Each of
+    tests/test_ingest.py's tests uses pytest's own `tmp_path` fixture (via
+    `monkeypatch.setenv("AUDIT_DIR", ...)`), which lands under whatever
+    `--basetemp` is active; test_failure_path.py's e2e test uses the
+    `tmp_db` fixture from tests/conftest.py, same mechanism. Pointing
+    `--basetemp` at a directory this function owns, then globbing under it
+    afterward, makes every one of these records something this specific
+    run just produced.
+    """
     if skip_slow:
-        tests_note = "test run skipped (--skip-slow)"
-    else:
+        return True, "test run skipped (--skip-slow)"
+
+    basetemp = Path(tempfile.mkdtemp(prefix="jg13_basetemp_"))
+    try:
         result = run_command(
-            [sys.executable, "-m", "pytest", "-q", *JG13_TESTS], timeout_s=300.0
+            [sys.executable, "-m", "pytest", "-q", f"--basetemp={basetemp}", *JG13_TESTS],
+            timeout_s=300.0,
         )
         if not result.ok:
             tail = (result.stdout or result.stderr).strip().splitlines()
-            problems.append(f"the three tests did not pass: {tail[-1] if tail else 'no output'}")
-            tests_note = "3 tests FAILED"
-        else:
-            tests_note = "3 tests pass"
+            detail = tail[-1] if tail else "no output"
+            return False, f"the three tests did not pass: {detail}"
 
-    records = audit_records()
-    duplicates = [
-        r for r in records
-        if r.get("outcome") == "duplicate_suppressed" or (
-            (r.get("execution") or {}).get("status") == "duplicate_suppressed"
+        records: list[dict] = []
+        for path in sorted(basetemp.glob("**/audit/*.jsonl")):
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+
+        problems: list[str] = []
+        duplicates = [
+            r for r in records
+            if r.get("outcome") == "duplicate_suppressed" or (
+                (r.get("execution") or {}).get("status") == "duplicate_suppressed"
+            )
+        ]
+        if not duplicates:
+            problems.append("no duplicate_suppressed execution in the audit log")
+
+        out_of_order = [
+            r for r in records
+            if r.get("outcome") == "out_of_order"
+            or "out_of_order" in str(r.get("rationale", "")).lower()
+        ]
+        if not out_of_order:
+            problems.append("no out_of_order webhook_event in the audit log")
+
+        if problems:
+            return False, "; ".join(problems)
+        return True, (
+            f"3 tests pass; {len(duplicates)} duplicate_suppressed execution(s), "
+            f"{len(out_of_order)} out_of_order webhook_event(s) in the audit log "
+            f"(from this run's own {len(records)} record(s), not accumulated history)"
         )
-    ]
-    if not duplicates:
-        problems.append("no duplicate_suppressed execution in the audit log")
-
-    out_of_order = [
-        r for r in records
-        if r.get("outcome") == "out_of_order"
-        or "out_of_order" in str(r.get("rationale", "")).lower()
-    ]
-    if not out_of_order:
-        problems.append("no out_of_order webhook_event in the audit log")
-
-    if problems:
-        return False, "; ".join(problems)
-    return True, (
-        f"{tests_note}; {len(duplicates)} duplicate_suppressed execution(s), "
-        f"{len(out_of_order)} out_of_order webhook_event(s) in the audit log"
-    )
+    finally:
+        shutil.rmtree(basetemp, ignore_errors=True)
 
 
 def jg14() -> tuple[bool, str]:

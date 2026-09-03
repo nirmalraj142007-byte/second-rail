@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -24,7 +25,7 @@ from src.db.repo import get_episode_by_payment_id, insert_customer_if_absent
 from src.diagnose.baseline import RegexBaseline
 from src.diagnose.cache import DiskCache
 from src.diagnose.classifier import Diagnoser
-from src.execute.executor import RazorpayExecutor
+from src.execute.executor import ExecutionResult, RazorpayExecutor
 from src.execute.faults import FaultInjectingExecutor, FaultPlan
 from src.gate.checks import Episode
 from src.ingest.app import app, drain
@@ -50,6 +51,13 @@ def _post_webhook(client: TestClient, body: bytes, event_id: str):
     response = client.post("/webhooks/razorpay", content=body, headers=headers)
     drain()
     return response
+
+
+def _records(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines if line.strip()]
 
 
 def test_retry_exhaustion_is_accounted_and_a_rerun_is_a_true_no_op(
@@ -193,3 +201,57 @@ def test_retry_exhaustion_is_accounted_and_a_rerun_is_a_true_no_op(
     assert conn.execute(
         "SELECT COUNT(*) AS n FROM execution WHERE episode_id = ?", (episode.episode_id,)
     ).fetchone()["n"] == 1
+
+    # -- that same re-submission, run through Runner, writes it to the audit
+    #    log too -- not just the executor's own return value ---------------
+    # RazorpayExecutor's real idempotency check (Step 1 of
+    # create_recovery_link, exercised for real just above) never itself
+    # calls the audit writer -- only Runner.run()'s per-episode wrapper
+    # does (src/runner.py, the `else` branch after a successful executor
+    # call). A genuine second Runner.run() pass over this same episode
+    # would be suppressed at the gate's own `duplicate` check first (it's
+    # payment_id-scoped against the `episode` table, not run-scoped), so
+    # the only way to reach Runner's execute-stage wrapper with a
+    # duplicate_suppressed result is to hand it an executor that reports
+    # one -- exactly the return value just proven genuine above. This
+    # isolates what this block actually verifies (does Runner write the
+    # outcome it's given?) using the same executor-boundary-stub technique
+    # this file already uses for the injected-429 fault plan.
+    # Runner's own first pass above inserted an `episode` row for this
+    # payment_id (required for the decision/gate_check/execution rows'
+    # foreign keys) -- gate's own `duplicate` check would suppress this
+    # second pass before it ever reached execute otherwise, same reason
+    # this test bridges ingest -> Runner by hand near the top. `decision`
+    # also carries UNIQUE(episode_id) (one decision per episode, ever) --
+    # clearing it and `gate_check` too lets this second pass re-decide the
+    # same episode_id rather than colliding on either.
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute("DELETE FROM decision WHERE episode_id = ?", (episode.episode_id,))
+    conn.execute("DELETE FROM gate_check WHERE episode_id = ?", (episode.episode_id,))
+    conn.execute("DELETE FROM episode WHERE episode_id = ?", (episode.episode_id,))
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys=ON")
+
+    stub_executor = Mock()
+    stub_executor.create_recovery_link.return_value = ExecutionResult(
+        status="duplicate_suppressed",
+        idempotency_key=idempotency_key,
+        plink_id=failed_row["plink_id"],
+        created_new=False,
+    )
+    dup_run_id = "e2e_fail_dup_run"
+    dup_audit = AuditWriter(dup_run_id, tmp_db.audit_dir, conn)
+    dup_runner = Runner(
+        conn, dup_audit, config_bundle, settings,
+        diagnoser=diagnoser, policy_engine=policy_engine, selector=selector,
+        executor=stub_executor,
+    )
+    dup_runner.run([episode], "dry_run", run_id=dup_run_id)
+    dup_audit.close()
+
+    stub_executor.create_recovery_link.assert_called_once()
+    dup_records = _records(tmp_db.audit_dir / f"{dup_run_id}.jsonl")
+    dup_outcomes = [r.get("outcome") for r in dup_records if r.get("episode_id") == episode.episode_id]
+    assert "duplicate_suppressed" in dup_outcomes, (
+        f"Runner did not write duplicate_suppressed to the audit log; saw {dup_outcomes}"
+    )
