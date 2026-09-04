@@ -187,6 +187,8 @@ Stack: Python 3.11, FastAPI, Pydantic 2.9, SQLite (WAL), Typer, Rich, matplotlib
 
 [KNOWN_ISSUES.md](KNOWN_ISSUES.md) carries the defects I found and have not yet closed, rather than the ones fixed quietly.
 
+[second-rail-build-blueprint.md](second-rail-build-blueprint.md) is the planning document I worked from, written with AI assistance before any code existed. I kept it in the repo rather than deleting it once parts of it went stale — every decision in it, including the ones I later reversed, is something I can defend directly if asked.
+
 ## How to check this in 90 seconds
 
 `make judge-quickstart` prints this same sequence with the expected outcome of each step — [scripts/judge_quickstart.py](scripts/judge_quickstart.py) is the single source for both.
