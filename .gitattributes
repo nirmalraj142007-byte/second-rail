@@ -1,0 +1,16 @@
+# *.jsonl blobs are committed as LF. Without this file, checkout behaviour
+# depends entirely on each machine's own core.autocrlf -- on a machine with
+# autocrlf=true (this dev box), git silently converts LF -> CRLF on
+# checkout, which changes the file's sha256 without changing a single
+# byte of its actual content. holdout/SEAL.sha256 was sealed against this
+# machine's CRLF-converted working tree, not the LF blob a differently
+# -configured clone actually receives -- `make verify-seal` (and `make
+# eval`, which calls it first) failed on exactly that mismatch for a
+# fresh clone whose autocrlf setting doesn't happen to match this one.
+# Reproduced directly: `git show HEAD:holdout/sealed.jsonl | sha256sum`
+# (the real blob, fd85813a...) disagreed with the working-tree file's own
+# sha256sum (6e7967ec..., what SEAL.sha256 recorded) on this exact repo.
+# `eol=lf` forces LF on checkout on every platform regardless of local
+# autocrlf, so every clone converges on the same bytes the blob actually
+# contains -- the seal is then verifiable everywhere, not just here.
+*.jsonl text eol=lf

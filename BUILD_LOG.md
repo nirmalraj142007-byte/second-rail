@@ -2194,3 +2194,44 @@ written with AI assistance and is kept in-repo, defensible, rather than
 deleted once parts of it went stale. `make artifact-scan` and
 `make judge-check` both re-confirmed at the same 17/18 result (JG-06
 only, unchanged) after each step.
+
+**Third post-freeze change — `holdout/SEAL.sha256` was sealed against
+this machine's own git config, not against what a clone anywhere else
+actually receives.** A conflicting report claimed a fresh clone
+computes a different `sealed.jsonl` hash (`fd85813a...`) than what
+this machine verifies (`6e7967ec...`, matching the then-committed
+`SEAL.sha256` exactly). Confirmed directly, not assumed: `git config
+core.autocrlf` on this box is `true`; no `.gitattributes` existed;
+`git check-attr -a holdout/sealed.jsonl` returned nothing. Comparing
+the raw git blob (`git show HEAD:holdout/sealed.jsonl`, LF-only) against
+the checked-out working-tree file (CRLF, from autocrlf silently
+converting on checkout) showed exactly the two hashes in the report --
+`fd85813a...` is the blob's real hash; `6e7967ec...` is what autocrlf
+produces on this machine specifically. `make seal` had been run here,
+so the committed `SEAL.sha256` recorded the CRLF hash, not the blob's.
+Any clone whose local `core.autocrlf` doesn't happen to match this
+machine's checks out the LF blob and gets a `sealed.jsonl` hash that
+disagrees with the committed seal -- `make verify-seal` fails, and
+since `scripts/eval.py` calls it as its very first step, `make eval`
+-- the #1 command in the acceptance test -- fails immediately for any
+such judge. All 6 tracked `.jsonl` files in the repo showed the same
+blob-vs-working-tree divergence (`git ls-files "*.jsonl"`, hashed
+each); only `sealed.jsonl`/`labels.jsonl` have a committed hash anyone
+checks, so they were the only ones actually broken, but the same class
+of bug was latent in the other four.
+
+Fixed with `.gitattributes`: `*.jsonl text eol=lf`, which forces LF on
+checkout on every platform regardless of local `autocrlf`, so every
+clone converges on the same bytes the blob already contains --
+confirmed the blob content itself needed no change
+(`git add --renormalize .` staged nothing beyond `.gitattributes`
+itself). Working tree still needed a forced refresh on this machine
+specifically (`git checkout HEAD -- <path>` alone was a no-op --
+git's checkout short-circuits when it doesn't detect an update is
+needed off stat info alone; deleting the files first and re-checking
+them out was what actually re-applied the new smudge filter).
+Re-sealed (`make seal`) against the now-canonical LF working tree --
+`SEAL.sha256` now records `fd85813a.../141e772d...`, matching the git
+blob exactly, not just this machine's checkout. `make verify-seal`,
+`make eval`, the full test suite (197 passed), and `make judge-check`
+(17/18, JG-06 only, unchanged) all re-confirmed clean afterward.
