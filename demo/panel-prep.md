@@ -1,17 +1,17 @@
 # Panel prep — five unscripted answers, plus one for the close
 
 CLAUDE.md's voice discipline applies here more than anywhere else: these
-are delivered as recall, not recital. Each heading below is
-`[WRITE THIS YOURSELF]` on purpose — a rehearsed paragraph reads worse on
-camera than a rough one in your own words. What follows each heading is
-the real, already-in-repo evidence to draw the answer from, printed so you
-know what you're standing on, not what to say.
+are delivered as recall, not recital. Answers below are filled in; on
+camera, deliver them as recall, not by reading this file — a rehearsed
+paragraph reads worse than a rough one spoken from memory. What follows
+each answer is the real, already-in-repo evidence it draws from, kept
+here so it stays checkable, not just asserted.
 
 ---
 
 ## A design decision I made and then reversed, and what the losing option was
 
-[WRITE THIS YOURSELF]
+We originally chose Gemini as the LLM provider because it fit our budget — cheap, with a generous free tier. But when we actually tried to use it, we hit three real problems: the specific model we planned on (Gemini 2.5 Flash) had already been deprecated and returned a 404 error; the newer model that replaced it had a mandatory "thinking mode" that used more tokens per call than our entire budget allowed; and even Gemini's documented rate limit didn't hold up in practice — we kept hitting 429 errors. So we switched to Groq, which ran the same workload cleanly with zero failures, and that's what we shipped with.
 
 **Supporting evidence — today's rehearsal (BUILD_LOG.md, "D10 (rehearsal)
 — 4 Sep 2026", first section):**
@@ -41,7 +41,7 @@ in `git log -p -- demo/episode_order.json` if you want the literal diff.
 
 ## Three caps-table numbers, each justified by an experiment
 
-[WRITE THIS YOURSELF]
+We tested three of our thresholds directly. The auto-approve ceiling: at ₹2,000, the review queue jumped to 24.8% of episodes — too many. At ₹5,000, it dropped to 8.5%, with about ₹106,500 in exposure per run — small enough to actually mean "the unusual case." For the outage-cluster threshold, we tested a range up to 40, and found 15 correctly caught our full planted 40-episode outage with zero false alarms — while, interestingly, setting the threshold to exactly 40 actually missed the outage entirely, because our check requires exceeding the threshold, not just meeting it. For the retry cap, comparing 3 versus 10 showed cap 10 recovers twice as many episodes, but at the cost of 20 extra wasted API calls per batch on episodes that fail anyway.
 
 **Supporting evidence — `config/guardrails.yaml`'s own inline comments,
 each pointing at a real swept experiment, not a guess:**
@@ -72,7 +72,7 @@ demonstrates you know the difference.
 
 ## One finding that shrinks my own claim
 
-[WRITE THIS YOURSELF]
+One number I'm not proud of: on real, raw error strings pulled directly from actual Razorpay test failures — the hardest, most realistic data in the whole evaluation — my classifier's accuracy dropped to just 20%. It still beat a simple regex baseline, which only got 5% right, but both numbers are weak. That's the honest result, not a flattering one, and I reported it plainly instead of burying it.
 
 **Supporting evidence — `evidence/report.md` §3 ("Where the claim gets
 weakest"), verbatim:**
@@ -96,7 +96,7 @@ R2.
 
 ## A real, unplanned failure from the build and my wrong first hypothesis
 
-[WRITE THIS YOURSELF]
+Tonight, right before freezing the final build, a test showed my sealed evaluation data failing its integrity check — the file's checksum didn't match what was recorded. My first guess was that the data itself had somehow gotten corrupted or accidentally regenerated. But when I actually compared the file hashes directly, I found the real cause: it was a line-ending difference. Windows and other systems sometimes store text files slightly differently — my local machine was silently converting these on checkout, so the exact same file could produce two different hash values depending on which computer opened it. I fixed it properly by adding a rule that forces every machine to treat these files identically, regardless of its own settings, so this can't silently happen again.
 
 **Supporting evidence — pick one from BUILD_LOG.md's "Wrong turns" index
 at the top of the file** (ten entries, one per dated session, each linked
@@ -119,7 +119,7 @@ HTTP 200), not assumed.
 
 ## Where I deliberately kept the model out, and why
 
-[WRITE THIS YOURSELF]
+I deliberately kept the AI model away from anything involving money or safety limits. The model never sees the actual rupee amount of a payment, never knows what the spending caps or thresholds are, and never decides on its own what action to take — it only picks from a short list of pre-approved options that a separate, deterministic part of the system already narrowed down. If the model ever tried to choose something outside that approved list, the entire process stops immediately. I even wrote an automated test that scans the safety-critical parts of my code and fails if it ever finds the AI model being called there at all. A language model can sound very convincing and still be wrong, so it shouldn't be the thing deciding whether money moves.
 
 **Supporting evidence — `docs/where-the-llm-is-not.md`, opening lines:**
 
@@ -142,7 +142,7 @@ this heading is the verbal complement to that beat, not a repeat of it.
 
 ## What does a Payment Link plus a cron job not do?
 
-[WRITE THIS YOURSELF]
+On the same 200-episode batch, our system contacted 99 out of 108 eligible episodes and recovered a net range of ₹51,482 to ₹95,580. A simple fixed-schedule retry — no diagnosis, no policy, just contact everyone eligible — contacted 102 episodes and recovered ₹51,412 to ₹95,449. Those ranges almost completely overlap. So the honest answer is: on this specific batch, the diagnosis-and-policy layer bought us 9 fewer unnecessary contacts and the same false-positive rate, for nearly identical money recovered. What it doesn't prove yet is that smarter targeting recovers meaningfully more — and I say that directly, because this whole comparison is a simulated result, not a live measurement.
 
 **Supporting evidence — `evidence/report.md` §4, the `FIXED_RETRY_AT_T30`
 baseline (Runner's gate-only fallback: every gate-eligible episode gets
