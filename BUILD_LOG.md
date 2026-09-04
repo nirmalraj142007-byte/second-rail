@@ -2176,3 +2176,21 @@ unrelated `ConfigError` code still propagates) — full suite green
 output, still `OK` on both assertions plus the cache-warm check, which is
 now a genuine optimisation rather than a load-bearing crash guard for
 this specific pinned take. `KNOWN_ISSUES.md` Issue 5 updated to "fixed."
+
+**Second post-freeze change to `v1.0-freeze`, documented per the same
+discipline.** `second-rail-build-blueprint.md` was removed
+(`35a729f`) on the reasoning that nothing functionally depends on it —
+confirmed true (no script reads its contents; the one code reference,
+`judge_check.py`'s `QUOTED_RULE_FILES`, is a string used only for
+exemption membership tests). Reverted (`4d61b7e`) on reconsideration:
+`CLAUDE.md` names it as the authoritative source document ("the
+blueprint wins" on any disagreement), so removing it left the project's
+own operating file pointing at something that no longer existed — an
+editorial dependency the earlier removal correctly flagged but didn't
+weigh heavily enough. Restored byte-identical to the pre-deletion
+version (`git diff` against the parent of `35a729f` is empty). Added one
+paragraph to `README.md`'s Build notes section disclosing it was
+written with AI assistance and is kept in-repo, defensible, rather than
+deleted once parts of it went stale. `make artifact-scan` and
+`make judge-check` both re-confirmed at the same 17/18 result (JG-06
+only, unchanged) after each step.
