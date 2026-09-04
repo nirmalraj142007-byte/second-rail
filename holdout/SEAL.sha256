@@ -1,3 +1,6 @@
+# Content sealed 2026-08-26 21:51 (452d640, the only commit touching these files).
+# Hashes re-recorded 2026-09-04: the original seal captured CRLF working-tree
+# hashes, not the git blob. Verify: git log -- holdout/sealed.jsonl
 sealed.jsonl  sha256:fd85813a2c05e9af50908841f625d79e141848ac407478f6a558301056a70f0a
 labels.jsonl  sha256:141e772d4995e80856d4d714e50bd2fd6a860878a7eabc7047eace4e0a4713c3
 sealed_at  2026-09-04T17:16:03.019100+05:30
