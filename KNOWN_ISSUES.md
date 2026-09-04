@@ -255,7 +255,7 @@ protected by the fix above; a judge who instead runs `make demo
 unaffected regardless of platform — a real keypress works exactly as
 designed.
 
-## Issue 5: `ActionSelector.select()` doesn't degrade on a missing-LLM `ConfigError`, only on `LLMCallError`
+## Issue 5 (fixed): `ActionSelector.select()` didn't degrade on a missing-LLM `ConfigError`, only on `LLMCallError`
 
 Found: Phase 20 (rehearsal), 4 Sep 2026 — R3 ("unset `LLM_API_KEY`, the
 run must complete on cache and degrade visibly to regex on a cache
@@ -288,32 +288,35 @@ diagnose has, and the fallback path this class already implements
 LLM right now" — it's just unreachable from `ConfigError`, only from
 `LLMCallError`.
 
-Status: not fixed. `src/choose/` is one of the two modules the LLM is
-permitted to touch (CLAUDE.md's boundary is `src/gate/`, `src/execute/`,
-`src/attribute/`, `src/audit/`), so this is in-bounds to change — but
-whether "missing key at choose-time" should stop the run loudly (current
-behaviour, and diagnose's deliberate precedent) or degrade like a
-transient LLM failure (what R3's own acceptance language asks for) is a
-real design call this session did not have standing to make unilaterally
-mid-rehearsal. Flagged instead of silently patched.
+Status: **fixed**, post-freeze, by explicit decision (the design call
+below was originally left to the user rather than made unilaterally
+mid-rehearsal; it came back "yes, degrade it"). `select()` now catches
+`ConfigError` alongside `LLMCallError` and degrades to
+`_fallback_selection()` the same way, scoped narrowly to
+`code == "NO_LLM_CONFIGURED"` specifically — any other `ConfigError` still
+propagates and halts the run, so this does not turn into a blanket
+"swallow all config errors" change. `src/choose/` is one of the two
+modules the LLM is permitted to touch (CLAUDE.md's boundary is
+`src/gate/`, `src/execute/`, `src/attribute/`, `src/audit/`), so this was
+in-bounds. The design question this entry originally posed — "missing key
+at choose-time: stop loud like diagnose's deliberate precedent, or
+degrade like a transient LLM failure?" — resolved to the latter,
+explicitly, not inferred.
 
-Mitigated, not fixed, for the current pinned demo take specifically:
-`scripts/rehearse.py`'s preflight now calls diagnose+choose for the
-pinned approval episode against the real committed cache before every
-rehearsal and reports cache-hit/miss/degraded explicitly rather than
-assuming. Confirmed warm as of this entry: `epi_00006` resolves diagnose
-by regex (no LLM call attempted) and choose via a genuine cache hit, so
-this specific take does not currently depend on a live LLM call and would
-not hit this gap even if `LLM_API_KEY` went missing during the real
-recording. The underlying code path is unchanged.
-
-Risk if unfixed: any future pinned episode, prompt version bump, or
-config change that invalidates the cache key for a `human_keystroke`
-episode's choose call — with the LLM unreachable at the same moment —
-crashes the run mid-take instead of showing the amber `llm_degraded` line
-CLAUDE.md's Risk 3 mitigation and README both describe. The rehearsal
-preflight catches this for the *current* pinned set on every re-run; it
-does not catch it for episode sets or configs that don't yet exist.
+Verified two ways, not just unit-tested: (1) the exact original
+reproduction — `ActionSelector.select()` against a real, empty
+`DiskCache` and a real `NullClient` — now returns a degraded `Selection`
+(`chosen_action="open_ticket"`, `llm_degraded=True`) instead of raising.
+(2) `tests/test_choose.py` gained two tests:
+`test_no_llm_configured_config_error_falls_back_and_run_completes`
+(mirrors the existing `LLMCallError` fallback test exactly, with a
+`ConfigError(code="NO_LLM_CONFIGURED")` in place of the timeout) and
+`test_config_error_other_than_no_llm_configured_still_propagates`
+(confirms the narrow scoping — a `ConfigError` with any other code still
+raises). Full suite green after (197 passed).
+`scripts/rehearse.py`'s preflight (added earlier in this same session,
+before this fix landed) still runs unchanged — it now confirms cache
+warmth as a genuine optimisation rather than a load-bearing crash guard.
 
 ## Issue 6: `evidence/razorpay_field_report.md` is silently overwritten by every `make harvest` re-run, destroying hand-written sections
 

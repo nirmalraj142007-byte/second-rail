@@ -43,7 +43,7 @@ from src.diagnose.baseline import RegexBaseline
 from src.diagnose.cache import DiskCache
 from src.diagnose.classifier import Diagnoser, Diagnosis
 from src.diagnose.llm_client import LLMResponse
-from src.errors import AdmissibilityError, LLMCallError
+from src.errors import AdmissibilityError, ConfigError, LLMCallError
 from src.execute.executor import ExecutionResult
 from src.gate.checks import Episode
 from src.runner import Runner
@@ -355,6 +355,87 @@ def test_llm_unavailable_falls_back_and_run_completes(tmp_path: Path) -> None:
     ).fetchone()
     assert row["chosen_action"] in match.fallback_priority
     assert row["chosen_action"] in match.admissible_actions
+
+
+# ---------------------------------------------------------------------------
+# 5b. NullClient's "no LLM configured" ConfigError degrades the same way
+#     LLMCallError does, instead of crashing the run (KNOWN_ISSUES.md Issue 5)
+# ---------------------------------------------------------------------------
+
+
+def test_no_llm_configured_config_error_falls_back_and_run_completes(tmp_path: Path) -> None:
+    """Forces the exact condition that used to crash: ActionSelector.select()
+    hits a cache miss with no LLM reachable at all. Before the fix, this
+    ConfigError (NullClient's "no LLM configured", code=NO_LLM_CONFIGURED)
+    propagated uncaught and the run halted; it must now degrade to
+    fallback_priority (llm_degraded=True) exactly like LLMCallError already
+    does, one line above."""
+    bundle = _bundle()
+    conn = _conn(tmp_path)
+    ep = _episode()
+    insert_customer_if_absent(
+        conn, customer_id=ep.customer_id, synthetic_name=None, contact_hash="x",
+        email_hash=None, segment="repeat", opted_out=False, opt_out_ts=None,
+        created_at=NOW.isoformat(),
+    )
+
+    taxonomy = bundle.taxonomy
+    baseline = RegexBaseline(taxonomy)
+    diagnoser = Diagnoser(
+        baseline, ScriptedLLMClient([]), DiskCache(tmp_path / "dcache"), taxonomy, _FakeSettings()
+    )
+    policy_engine = PolicyEngine(bundle.policy)
+
+    no_llm = ConfigError("no LLM configured", code="NO_LLM_CONFIGURED")
+    selector = ActionSelector(
+        ScriptedLLMClient([no_llm]), DiskCache(tmp_path / "scache"), _FakeSettings()
+    )
+
+    run_id = "run_no_llm_configured_test"
+    audit = AuditWriter(run_id, tmp_path / "audit", conn)
+    runner = Runner(
+        conn, audit, bundle, Settings(),
+        diagnoser=diagnoser, policy_engine=policy_engine, selector=selector,
+        executor=_NoopExecutor(),
+    )
+
+    summary = runner.run([ep], "dry_run", now=NOW, run_id=run_id)
+    audit.close()
+
+    assert summary.stopped_reason is None
+    assert summary.admissibility_rate == 1.0
+
+    match = policy_engine.resolve(ep, _diagnosis("C1"))
+    row = conn.execute(
+        "SELECT chosen_action FROM decision WHERE episode_id = ?", (ep.episode_id,)
+    ).fetchone()
+    assert row["chosen_action"] in match.fallback_priority
+    assert row["chosen_action"] in match.admissible_actions
+
+
+def test_config_error_other_than_no_llm_configured_still_propagates(tmp_path: Path) -> None:
+    """The degrade path is scoped to code="NO_LLM_CONFIGURED" specifically —
+    any other ConfigError still halts the run rather than being silently
+    absorbed as a degraded guess."""
+    bundle = _bundle()
+    conn = _conn(tmp_path)
+    ep = _episode()
+    insert_customer_if_absent(
+        conn, customer_id=ep.customer_id, synthetic_name=None, contact_hash="x",
+        email_hash=None, segment="repeat", opted_out=False, opt_out_ts=None,
+        created_at=NOW.isoformat(),
+    )
+
+    policy_engine = PolicyEngine(bundle.policy)
+    match = policy_engine.resolve(ep, _diagnosis("C1"))
+
+    other_error = ConfigError("something else is misconfigured", code="SOME_OTHER_CONFIG_ERROR")
+    selector = ActionSelector(
+        ScriptedLLMClient([other_error]), DiskCache(tmp_path / "scache2"), _FakeSettings()
+    )
+
+    with pytest.raises(ConfigError):
+        selector.select(ep, _diagnosis("C1"), match)
 
 
 # ---------------------------------------------------------------------------

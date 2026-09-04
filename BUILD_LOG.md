@@ -2159,3 +2159,20 @@ repeatedly across this session's testing (every non-interactive
 deliberately after) — always resolves `approval_timeout`, auto-rejects,
 never hangs past the 60s deadline. Confirms `LiveRunView.approval_prompt()`'s
 hard wall-clock deadline holds regardless of what's read from stdin.
+
+**Post-freeze change to `v1.0-freeze` (`ffc9afc`), documented per
+CLAUDE.md's freeze discipline.** Issue 5 above was left as a flagged
+design question rather than a unilateral fix, since "should a missing key
+at choose-time stop the run loud or degrade" has real arguments on both
+sides. Asked; answer came back "degrade it" — `ActionSelector.select()`
+now catches `ConfigError(code="NO_LLM_CONFIGURED")` alongside
+`LLMCallError` and routes it through the same `_fallback_selection()`
+path, scoped narrowly to that one code so no other `ConfigError` gets
+silently absorbed. Verified against the exact original crash
+reproduction (now returns a degraded `Selection` instead of raising) and
+two new tests in `tests/test_choose.py` (the degrade path, and that an
+unrelated `ConfigError` code still propagates) — full suite green
+(197 passed). Re-ran `scripts/rehearse.py`'s preflight after: unchanged
+output, still `OK` on both assertions plus the cache-warm check, which is
+now a genuine optimisation rather than a load-bearing crash guard for
+this specific pinned take. `KNOWN_ISSUES.md` Issue 5 updated to "fixed."

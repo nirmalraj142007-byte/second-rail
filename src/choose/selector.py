@@ -23,8 +23,10 @@ mechanisms enforce this, both load-bearing:
      *diagnosis* is a normal, expected kind of being wrong; a model
      *choosing outside its box* is the one failure mode this project
      refuses to paper over. LLMCallError (the LLM was unreachable at all)
-     is a different, non-adversarial failure and gets the graceful
-     fallback_priority path instead — see select()'s docstring.
+     and ConfigError(code="NO_LLM_CONFIGURED") (no LLM reachable AT ALL —
+     unset provider, or a real provider with no key) are both different,
+     non-adversarial failures and get the graceful fallback_priority path
+     instead — see select()'s docstring.
 
 BUDGET NOTE: this is the second LLM call per episode (after
 src/diagnose/classifier.py's classify call). CLAUDE.md's U-11 flags that
@@ -53,7 +55,7 @@ from src.choose.policy import PolicyMatch
 from src.diagnose.cache import DiskCache
 from src.diagnose.classifier import Diagnosis
 from src.diagnose.llm_client import LLMClient, LLMResponse
-from src.errors import AdmissibilityError, LLMCallError
+from src.errors import AdmissibilityError, ConfigError, LLMCallError
 from src.gate.checks import Episode, GateContext
 from src.logging_setup import get_logger
 
@@ -383,6 +385,22 @@ class ActionSelector:
         llm_degraded=True and the run continuing. See this module's
         docstring for why those two failure modes are handled so
         differently.
+
+        Also degrades, the same way, on ConfigError(code="NO_LLM_CONFIGURED")
+        — NullClient's signal that no LLM is reachable at all (LLM_PROVIDER
+        unset/none, or a real provider configured with no key). Unlike
+        src/diagnose/classifier.py's Diagnoser, which deliberately leaves
+        that ConfigError uncaught (regex resolves every episode there, so
+        reaching NullClient signals a genuine setup mistake worth stopping
+        for), choose has no such guarantee: every eligible episode needs
+        some answer from select(), and fallback_priority is precisely the
+        safe one for "no working LLM right now" — it was already reachable
+        from LLMCallError, just not from this. A cache miss with the LLM
+        genuinely unreachable used to crash the run instead of showing the
+        amber degraded line; see KNOWN_ISSUES.md Issue 5 for how this was
+        found. Any other ConfigError code still propagates uncaught — this
+        only degrades the specific "no LLM configured" condition, not
+        configuration problems in general.
         """
         fields = build_selection_fields(ep, diagnosis, match, ctx)
         prompt = render_prompt(match.admissible_actions, fields)
@@ -392,6 +410,13 @@ class ActionSelector:
             parsed, response = self._complete_with_repair(prompt, schema, match.admissible_actions)
         except LLMCallError as exc:
             self._logger.warning("LLM call failed (%s) — using deterministic fallback", exc)
+            return self._fallback_selection(ep, match)
+        except ConfigError as exc:
+            if exc.code != "NO_LLM_CONFIGURED":
+                raise
+            self._logger.warning(
+                "no LLM configured (%s) — using deterministic fallback", exc
+            )
             return self._fallback_selection(ep, match)
 
         if parsed is None:
