@@ -63,24 +63,10 @@ unset RAZORPAY_KEY_SECRET
 unset RAZORPAY_WEBHOOK_SECRET
 unset LLM_API_KEY
 
-# The Makefile's setup target invokes `python3.11` by that literal name.
-# On this dev box that name resolves in an interactive shell (a Windows App
-# Execution Alias stub) but old mingw32-make's CreateProcess call can't
-# launch it directly -- resolving to the real interpreter path and passing
-# it as a make command-line override (highest-precedence in GNU Make,
-# overriding the Makefile's own `PYTHON311 := python3.11`) works around that
-# without touching the Makefile default every other environment relies on.
-PYTHON311_RESOLVED=""
-if command -v python3.11 >/dev/null 2>&1; then
-  PYTHON311_RESOLVED="$(python3.11 -c 'import sys; print(sys.executable)' 2>/dev/null || true)"
-fi
-
 echo "== clean-clone-test: make setup =="
-if [ -n "$PYTHON311_RESOLVED" ]; then
-  "$MAKE_BIN" setup "PYTHON311=$PYTHON311_RESOLVED" || fail "make setup"
-else
-  "$MAKE_BIN" setup || fail "make setup"
-fi
+# The Makefile's own PYTHON311 := $(shell scripts/find_python.sh) now
+# resolves a real interpreter path itself -- no override needed here.
+"$MAKE_BIN" setup || fail "make setup"
 
 echo "== clean-clone-test: make eval (timed; must finish under 5 minutes) =="
 EVAL_START=$(date +%s)

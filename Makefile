@@ -1,5 +1,12 @@
 SHELL := /bin/bash
-PYTHON311 := python3.11
+# scripts/find_python.sh resolves this to a real, absolute interpreter path
+# (not a bare command name) -- `python3.11` alone breaks `make setup` under
+# mingw32-make on Windows, where it's commonly a WindowsApps alias stub that
+# mingw32-make's CreateProcess() can't launch directly. See that script's
+# own comment for the full reasoning, including why the search order isn't
+# just "whatever's called python". Still overridable: `make setup
+# PYTHON311=/path/to/python` wins over this, same as before.
+PYTHON311 := $(shell bash scripts/find_python.sh)
 N ?= 200
 
 ifeq ($(OS),Windows_NT)
