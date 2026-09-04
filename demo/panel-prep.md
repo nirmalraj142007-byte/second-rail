@@ -16,18 +16,22 @@ know what you're standing on, not what to say.
 **Supporting evidence — today's rehearsal (BUILD_LOG.md, "D10 (rehearsal)
 — 4 Sep 2026", first section):**
 
-> The obvious design was one plain "auto tier" episode to open the
-> stream, then the `>₹5,000` approval episode, then the outage cluster.
-> Checked before committing to it, not assumed: a real
-> `PolicyEngine.resolve()` pass ... showed only 4 of the 108 gate-eligible
-> train episodes match one of the 27 explicit policy rules at `auto` tier
-> at all — everything else falls to `default_rule`, which is
-> `human_keystroke` unconditionally, regardless of amount. ... The two
-> candidates that *do* sort early — `epi_00001` and `epi_00006` — both
-> resolve `human_keystroke`, one of them (`epi_00001`, Rs 2,875, under the
-> ceiling) for a reason that has nothing to do with the rupee threshold
-> the beat is supposed to demonstrate. ... `demo/episode_order.json` uses
-> one episode (`epi_00006`) as both the drill-down and the approval beat.
+Verbatim from that entry:
+
+```
+The obvious design was one plain "auto tier" episode to open the
+stream, then the >Rs 5,000 approval episode, then the outage cluster.
+Checked before committing to it, not assumed: a real
+PolicyEngine.resolve() pass ... showed only 4 of the 108 gate-eligible
+train episodes match one of the 27 explicit policy rules at auto tier
+at all -- everything else falls to default_rule, which is
+human_keystroke unconditionally, regardless of amount. ... The two
+candidates that do sort early -- epi_00001 and epi_00006 -- both
+resolve human_keystroke, one of them (epi_00001, Rs 2,875, under the
+ceiling) for a reason that has nothing to do with the rupee threshold
+the beat is supposed to demonstrate. ... demo/episode_order.json uses
+one episode (epi_00006) as both the drill-down and the approval beat.
+```
 
 The losing option (two episodes, one of them a false "auto" example) is
 still visible in `demo/episode_order.json`'s own `_opener_note` field, and
@@ -145,17 +149,25 @@ baseline (Runner's gate-only fallback: every gate-eligible episode gets
 `placeholder_action`/`P-00`, unconditionally — no diagnosis, no policy
 constraint, no admissible-set check):**
 
-> **FIXED_RETRY_AT_T30 baseline** — 102/102 gate-eligible episodes
-> contacted, out of the 200-episode sealed batch.
->
-> gross Rs 51,427 – Rs 95,464 | false-positive cost Rs 11 – Rs 20
-> (1 contact(s)) | **NET Rs 51,412 – Rs 95,449**
+Verbatim from `evidence/report.md` §4 — a design-target range under
+stated assumptions, not a point estimate, per that section's own framing:
 
-Compared against **Second Rail** on the same batch, same run:
+```
+FIXED_RETRY_AT_T30 baseline -- 102/102 gate-eligible episodes
+contacted, out of the 200-episode sealed batch.
 
-> 99/108 gate-eligible episodes contacted ...
-> gross Rs 51,497 – Rs 95,595 | false-positive cost Rs 11 – Rs 20
-> (1 contact(s)) | **NET Rs 51,482 – Rs 95,580**
+gross Rs 51,427 - Rs 95,464 | false-positive cost Rs 11 - Rs 20
+(1 contact(s)) | NET Rs 51,412 - Rs 95,449
+```
+
+Compared against **Second Rail** on the same batch, same run, same
+section, same framing:
+
+```
+99/108 gate-eligible episodes contacted ...
+gross Rs 51,497 - Rs 95,595 | false-positive cost Rs 11 - Rs 20
+(1 contact(s)) | NET Rs 51,482 - Rs 95,580
+```
 
 The two net ranges overlap almost entirely — this is your ammunition for
 naming what the diagnosis-and-policy layer is actually buying (9 fewer
