@@ -47,6 +47,24 @@ LIMITATIONS.md). The manifest exists so a partial run resumes instead of
 restarting, and so re-running never recreates links that already exist.
 That property is what makes the script safe to re-run, not an assumption
 about any particular limit being in force.
+
+Two re-run hazards found while rehearsing this project (BUILD_LOG.md's
+D10 entry) — one fixed here, one that can't be:
+  - `evidence/harvested_errors.jsonl`'s `harvest_id` field is pinned:
+    `data/generator.py`'s `SEALED_ONLY_HARVEST_IDS` hardcodes 11 specific
+    harvest_id strings to keep them sealed-split-only. `_write_harvested()`
+    used to assign every record a fresh ULID on every write, silently
+    orphaning that frozenset on any re-run (reproduced live: 11 failing
+    tests, all in test_generator.py). Fixed — harvest_id is now carried
+    forward from the existing file, keyed by the real, immutable
+    `payment_id`, so it survives any number of re-runs.
+  - `evidence/razorpay_field_report.md` is NOT safe to regenerate: the
+    committed file has real, hand-written narrative sections this script's
+    template does not reproduce, and `_write_field_report()` overwrites the
+    whole file unconditionally on every run. Not fixed — see the warning
+    at that function's write call for why a safe automatic fix isn't
+    possible here. `git checkout HEAD -- evidence/razorpay_field_report.md`
+    after any real re-run of this script.
 """
 
 from __future__ import annotations
@@ -393,15 +411,49 @@ def _real_forced_by(payment: dict[str, Any]) -> str | None:
     return None
 
 
+def _existing_harvest_ids_by_payment_id() -> dict[str, str]:
+    """`harvest_id` is not just a label — `data/generator.py`'s
+    `SEALED_ONLY_HARVEST_IDS` hardcodes a frozenset of specific harvest_id
+    strings, pinning 11 of the 20 harvested records to the sealed split
+    only. Regenerating a fresh ULID for every record on every re-run (this
+    function's original behaviour) silently orphans that entire frozenset
+    the moment `make harvest` is re-run for any reason — `data/generator.py`
+    then can't find a shared (train-eligible) anchor for whichever taxonomy
+    class lost its only non-sealed-only record, and raises. Reproduced live
+    while rehearsing this project (11 failing tests, all in
+    test_generator.py, traced to exactly this) — see BUILD_LOG.md's D10
+    entry. Reading the existing file first and keying by `payment_id`
+    (stable — it's the real Razorpay payment id, never reassigned) keeps
+    `harvest_id` stable across re-runs for every record that already has
+    one, so a re-run only ever needs a fresh id for a genuinely new
+    payment_id."""
+    if not HARVESTED_PATH.exists():
+        return {}
+    ids: dict[str, str] = {}
+    for line in HARVESTED_PATH.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        record = json.loads(line)
+        payment_id = record.get("payment_id")
+        harvest_id = record.get("harvest_id")
+        if payment_id and harvest_id:
+            ids[payment_id] = harvest_id
+    return ids
+
+
 def _write_harvested(manifest: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    existing_ids = _existing_harvest_ids_by_payment_id()
     records: list[dict[str, Any]] = []
     for entry in manifest:
         payment = entry.get("raw_payment")
         if not payment:
             continue
+        payment_id = payment.get("id")
+        harvest_id = existing_ids.get(payment_id) or str(ULID())
         records.append(
             {
-                "harvest_id": str(ULID()),
+                "harvest_id": harvest_id,
                 "captured_at": datetime.now(IST).isoformat(timespec="seconds"),
                 "forced_by": _real_forced_by(payment),
                 "instrument": payment.get("method"),
@@ -619,6 +671,20 @@ def _write_field_report(probe: dict[str, Any] | None, records: list[dict[str, An
             )
     lines.append("")
 
+    # WARNING, found while rehearsing this project (see BUILD_LOG.md's D10
+    # entry): this unconditionally overwrites evidence/razorpay_field_report.md
+    # from the template above on every run, but the COMMITTED file has real,
+    # hand-written narrative sections (the "Update, Phase 8" / "Update, Phase
+    # 17" paragraphs telling the actual chase-the-rate-limit story) that this
+    # template does not reproduce — a second real run silently replaces that
+    # history with the terser generated version. Unlike harvested_errors.jsonl
+    # (fixed above: harvest_id is now stable across re-runs because that file
+    # has no hand-authored prose to lose, only structured records), there is
+    # no safe automatic fix for this one — reconstructing the exact prose
+    # would mean guessing at a historical record, which is worse than leaving
+    # it as a known hazard. If you re-run `make harvest` for real, diff this
+    # file afterwards and `git checkout HEAD -- evidence/razorpay_field_report.md`
+    # if the hand-written sections got clobbered.
     FIELD_REPORT_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

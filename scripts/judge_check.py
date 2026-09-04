@@ -290,12 +290,29 @@ class CommandResult:
 
 def run_command(argv: list[str], *, timeout_s: float) -> CommandResult:
     """Every subprocess here is bounded. A hung `make eval` must surface as a
-    FAIL carrying a timeout, not as a judge-check that never returns."""
+    FAIL carrying a timeout, not as a judge-check that never returns.
+
+    `input=""` forces a real, closed anonymous pipe onto the child's stdin
+    rather than leaving it inherited. This is not a no-op on Windows: a
+    child process here inherits a console handle whose `isatty()` reports
+    True even under `stdin=subprocess.DEVNULL` or a shell `< /dev/null`
+    redirect (reproduced directly on this box; see BUILD_LOG.md's
+    rehearsal entry) — ConPTY provides every child a virtual console
+    regardless of what's redirected upstream. `["demo"]` below runs
+    `scripts/demo.py` against a fresh clone's un-deduplicated episode set,
+    where `LiveRunView.request_approval()` (src/ui/live.py) checks exactly
+    that `isatty()` to decide whether to block on a real keypress or queue
+    the episode — misdetected as interactive, it blocks a full 60s per
+    `human_keystroke` episode with nobody there to press a key, which was
+    enough alone to blow this call's 300s timeout on a fresh clone. A real
+    OS pipe (what `input=""` produces) is the one stdin shape whose
+    `isatty()` reliably reports False here."""
     started = time.monotonic()
     try:
         proc = subprocess.run(
             argv, cwd=ROOT, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=timeout_s, check=False,
+            input="",
         )
     except subprocess.TimeoutExpired:
         return CommandResult(tuple(argv), 124, time.monotonic() - started, "", "", True)

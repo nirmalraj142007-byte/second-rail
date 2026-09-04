@@ -205,3 +205,151 @@ processed" instead of "this customer doesn't exist," and
 discourages investigating it. A judge or an operator debugging a
 suppressed/skipped episode during a live run would be pointed at the wrong
 explanation.
+
+## Issue 4: `sys.stdin.isatty()` misreports True for a non-interactive child on this platform
+
+Found: Phase 20 (rehearsal), 4 Sep 2026 — see BUILD_LOG.md's D10 entry,
+Bug 2, for the full investigation.
+
+Location: [`src/ui/live.py:454`](src/ui/live.py#L454), inside
+`LiveRunView.request_approval()`.
+
+Description: `request_approval()` checks `sys.stdin.isatty()` to decide
+whether a `human_keystroke` episode should block on a real interactive
+approval prompt (60s timeout) or queue instantly for `make approve`. On
+this development machine (Windows, Git Bash / ConPTY), that check reports
+`True` — "genuinely interactive" — for a child Python process whose stdin
+was redirected from `/dev/null` (a shell `< /dev/null`), explicitly set to
+`subprocess.DEVNULL`, or simply left inherited under
+`subprocess.run(capture_output=True)` with no `stdin=` override at all.
+Reproduced in isolation, with no product code involved: `python -c
+"import sys; print(sys.stdin.isatty())"` prints `True` under all three of
+those invocation shapes, and `False` only when stdin is a genuine
+anonymous OS pipe (`subprocess.run(..., input="")`). This is a platform
+behaviour (ConPTY provides every child process a virtual console
+regardless of what's redirected upstream), not a defect in this check's
+own logic — the check is correct Python; the platform's answer to it is
+what's misleading.
+
+Status: worked around, not fixed, at the two call sites this repo
+controls that matter for the submission gate: `scripts/judge_check.py`'s
+`run_command()` and `scripts/rehearse.py`'s command beats now both pass
+`input=""` to force the one stdin shape that reports correctly. `src/ui/
+live.py` itself is unchanged — the check is correct on platforms where the
+underlying isatty() answer is trustworthy, and this repo's own callers of
+`request_approval()` are now the affected ones fixed.
+
+Risk if unfixed at a call site this repo does not control: any command
+that shells out to `scripts/demo.py` (directly, or via `make demo`)
+without explicitly forcing a real closed pipe onto its stdin — a judge
+running bare `make demo --dry-run` from an automated grading harness or a
+CI runner on an affected platform, for instance — blocks a real 60
+seconds per `human_keystroke` episode instead of queuing, with nobody
+there to press a key. Given the sealed-split escalation-tier distribution
+elsewhere in this repo's evidence (`human_keystroke` is the majority
+tier, not a minority one), a full default-source run could plausibly take
+hours rather than minutes under this condition. `README.md`'s "How to
+check this in 90 seconds" section and `make judge-check` are both
+protected by the fix above; a judge who instead runs `make demo
+--dry-run` themselves, by hand, from an interactive terminal, is
+unaffected regardless of platform — a real keypress works exactly as
+designed.
+
+## Issue 5: `ActionSelector.select()` doesn't degrade on a missing-LLM `ConfigError`, only on `LLMCallError`
+
+Found: Phase 20 (rehearsal), 4 Sep 2026 — R3 ("unset `LLM_API_KEY`, the
+run must complete on cache and degrade visibly to regex on a cache
+miss"). See BUILD_LOG.md's D10 entry.
+
+Location: [`src/choose/selector.py:391`](src/choose/selector.py#L391),
+inside `ActionSelector.select()`.
+
+Description: `select()` catches exactly one exception type from the LLM
+call, `except LLMCallError`, and degrades to the deterministic
+`_fallback_selection()` (`config/policy_table.yaml`'s `fallback_priority`)
+on it. `NullClient` (the `LLM_PROVIDER=none` implementation) raises
+`ConfigError`, not `LLMCallError`, whenever it is actually called — and a
+`ConfigError` here is not caught anywhere, so it propagates and crashes
+the run. Reproduced directly: `ActionSelector.select()` against a real,
+guaranteed-empty `DiskCache` and a real `NullClient` raises `ConfigError`
+uncaught (not inferred from reading the code — called directly and
+observed the traceback).
+
+`src/diagnose/classifier.py` makes the identical choice for the
+*diagnose* stage, and its docstring gives a real, considered reason:
+`RegexBaseline` resolves this project's own synthetic data with no LLM
+call at all, so reaching `NullClient` there signals a genuine setup
+mistake worth stopping loudly for, not a transient condition to paper
+over. That reasoning does not carry over to `choose` in the same way —
+every gate-eligible episode needs *some* answer from `select()`, there is
+no regex-equivalent "already resolved, no LLM needed" shortcut the way
+diagnose has, and the fallback path this class already implements
+(`_fallback_selection()`) is precisely the safe answer for "no working
+LLM right now" — it's just unreachable from `ConfigError`, only from
+`LLMCallError`.
+
+Status: not fixed. `src/choose/` is one of the two modules the LLM is
+permitted to touch (CLAUDE.md's boundary is `src/gate/`, `src/execute/`,
+`src/attribute/`, `src/audit/`), so this is in-bounds to change — but
+whether "missing key at choose-time" should stop the run loudly (current
+behaviour, and diagnose's deliberate precedent) or degrade like a
+transient LLM failure (what R3's own acceptance language asks for) is a
+real design call this session did not have standing to make unilaterally
+mid-rehearsal. Flagged instead of silently patched.
+
+Mitigated, not fixed, for the current pinned demo take specifically:
+`scripts/rehearse.py`'s preflight now calls diagnose+choose for the
+pinned approval episode against the real committed cache before every
+rehearsal and reports cache-hit/miss/degraded explicitly rather than
+assuming. Confirmed warm as of this entry: `epi_00006` resolves diagnose
+by regex (no LLM call attempted) and choose via a genuine cache hit, so
+this specific take does not currently depend on a live LLM call and would
+not hit this gap even if `LLM_API_KEY` went missing during the real
+recording. The underlying code path is unchanged.
+
+Risk if unfixed: any future pinned episode, prompt version bump, or
+config change that invalidates the cache key for a `human_keystroke`
+episode's choose call — with the LLM unreachable at the same moment —
+crashes the run mid-take instead of showing the amber `llm_degraded` line
+CLAUDE.md's Risk 3 mitigation and README both describe. The rehearsal
+preflight catches this for the *current* pinned set on every re-run; it
+does not catch it for episode sets or configs that don't yet exist.
+
+## Issue 6: `evidence/razorpay_field_report.md` is silently overwritten by every `make harvest` re-run, destroying hand-written sections
+
+Found: Phase 20 (rehearsal), 4 Sep 2026 — investigating a related bug
+(`harvest_id` instability, now fixed — see BUILD_LOG.md's D10 entry, R2).
+
+Location: [`scripts/harvest_errors.py:532`](scripts/harvest_errors.py#L532),
+`_write_field_report()`, and its `FIELD_REPORT_PATH.write_text()` call.
+
+Description: `_write_field_report()` rebuilds
+`evidence/razorpay_field_report.md` from a fixed template on every run of
+`python -m scripts.harvest_errors`, unconditionally overwriting whatever
+is on disk. The *committed* file is not purely auto-generated content,
+though — it carries real, hand-written narrative sections ("Update, Phase
+8, 27 Aug 2026", "Update, Phase 17, 2 Sep 2026") documenting the actual
+investigation into a Razorpay-side rate limit, added by hand after an
+earlier auto-generation and never folded back into the template. Any real
+re-run replaces that history with the template's terser, generic Step 5
+writeup. Reproduced twice this session: `git diff` after a real
+`make harvest` re-run showed the Phase 8/17 paragraphs gone, replaced by
+~4 lines of auto-generated summary, both before and after fixing the
+unrelated `harvest_id` bug (so this is independent of that fix, not a
+side effect of it).
+
+Status: not fixed, and not safely fixable automatically — reconstructing
+the missing prose programmatically would mean guessing at a historical
+record, which this project's evidence discipline treats as worse than
+leaving a disclosed gap. Mitigated: a warning now sits at both the module
+docstring and the exact `write_text()` call in `scripts/harvest_errors.py`,
+naming this file specifically and instructing `git diff` +
+`git checkout HEAD -- evidence/razorpay_field_report.md` after any real
+re-run. Restored to the committed version as of this entry.
+
+Risk if unfixed: any future real invocation of `make harvest` (a
+presenter re-verifying R2 before a later recording session, a judge
+attempting to reproduce the harvest) silently destroys this file's
+narrative history unless the operator knows to check `git diff`
+afterward — which, before this entry and the code warning, nothing told
+them to do.

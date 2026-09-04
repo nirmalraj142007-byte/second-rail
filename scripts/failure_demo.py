@@ -20,6 +20,21 @@ persistent shared DB would silently gate-suppress all 12 on the second
 run. Audit records still land in the normal `evidence/audit/` directory —
 only the bookkeeping database is throwaway, not the audit trail.
 
+Every link this run creates is cancelled (`src/execute/rollback.py`,
+reused, not duplicated) before the process exits. Resetting the local DB
+is not enough on its own to make three consecutive real runs identical:
+`reference_id` is derived from `payment_id` + a *fixed* placeholder policy
+rule (both deterministic on purpose, for the reason above), so it is the
+same string on every invocation, and Razorpay's own test-mode account
+remembers a `reference_id` across runs, not just within one — a second
+real run against an account that still holds the first run's links gets
+HTTP 400 `BAD_REQUEST_ERROR` ("... already exists") on nearly every
+episode instead of the intended 429 fault-injection flow, reproduced live
+while rehearsing this script (see BUILD_LOG.md). Cancelling a link frees
+its `reference_id` for reuse (confirmed against the real API, same BUILD_LOG
+entry) — cancelling here, every run, is what makes three consecutive real
+takes actually behave identically rather than only the first one.
+
 The primary scenario is recorded on camera; scripts/failure_demo_backup.py
 exists because a stateful fault injector interacting with a live API is
 exactly the thing that works on take one and not on take three.
@@ -39,6 +54,7 @@ from src.db.repo import get_opted_out_customer_ids
 from src.execute.executor import RazorpayExecutor
 from src.execute.faults import FaultInjectingExecutor, FaultPlan, recovered_amount_paise
 from src.execute.idempotency import idempotency_key
+from src.execute.rollback import rollback_run
 from src.gate.checks import Episode
 from src.logging_setup import get_logger, setup_logging
 from src.razorpay_client import RazorpayClient
@@ -158,6 +174,16 @@ def main() -> int:
           f"{g.executor_retry_cap} consecutive attempts")
     print("=" * 72)
 
+    # `audit` stays open across BOTH the runner's batch loop and the manual
+    # idempotency re-run below — inner_executor.create_recovery_link() for
+    # that re-run writes through the same audit writer, and closing it
+    # right after runner.run() (as this used to) crashes with "I/O
+    # operation on closed file" the moment the run's OWN stopping rule
+    # fires early (reproduced live: real, unrelated Razorpay-side rate
+    # limiting during rehearsal pushed consecutive_executor_errors to
+    # threshold at episode 3, well before the deliberately-faulted episode
+    # 7 — see BUILD_LOG.md). That is a real, if less common, path through
+    # this script, not just the deliberate-fault-only one.
     try:
         inner_executor = RazorpayExecutor(
             conn=conn,
@@ -177,9 +203,18 @@ def main() -> int:
 
         runner = Runner(conn, audit, bundle, settings, executor=faulty_executor)
         summary = runner.run(episode_slice, mode="execute", run_id=run_id)
+
+        exit_code = _finish_failure_demo(
+            conn, client, inner_executor, run_id, episode_slice, summary, g
+        )
     finally:
         audit.close()
+        client.close()
+        conn.close()
+    return exit_code
 
+
+def _finish_failure_demo(conn, client, inner_executor, run_id, episode_slice, summary, g) -> int:
     execution_failed = summary.by_outcome.get("execution_failed", 0)
     actioned = summary.by_outcome.get("actioned", 0)
     threshold = g.consecutive_executor_errors_stop
@@ -200,32 +235,62 @@ def main() -> int:
 
     # Automatic re-run of the failed episode, proving the idempotency key
     # blocks a second link even for an episode whose only prior attempt
-    # failed — a fresh call still finds the earlier row and refuses.
+    # failed — a fresh call still finds the earlier row and refuses. Only
+    # meaningful if episode 7 was actually reached this run: the stopping
+    # rule (consecutive_executor_errors) can fire earlier than episode 7 —
+    # not from the deliberate fault plan, but from real, unrelated
+    # Razorpay-side rate limiting on episodes 1-6, reproduced live during
+    # rehearsal (see BUILD_LOG.md) — and re-running an episode with no
+    # prior attempt at all would create a fresh link, not prove idempotency.
     failed_episode = episode_slice[FAULT_EPISODE_INDEX - 1]
     key = idempotency_key(failed_episode.payment_id, PLACEHOLDER_POLICY_RULE)
-    links_before = conn.execute(
-        "SELECT COUNT(*) AS n FROM execution WHERE run_id = ? AND status = 'created'", (run_id,)
-    ).fetchone()["n"]
+    # The runner processes episode_slice strictly in order and writes a
+    # gate_check row for every episode it reaches before stopping — this is
+    # true regardless of *why* a run stopped early, so it is a more direct
+    # check than re-deriving "did we get to index 7" from stopped_reason.
+    episode_7_reached = (
+        conn.execute(
+            "SELECT 1 FROM gate_check WHERE episode_id = ? LIMIT 1", (failed_episode.episode_id,)
+        ).fetchone()
+        is not None
+    )
+
+    if not episode_7_reached:
+        print()
+        print(
+            f"run stopped early (stopped_reason={summary.stopped_reason!r}) before reaching "
+            f"episode {FAULT_EPISODE_INDEX} ({failed_episode.payment_id}) - skipping the "
+            "idempotency re-run proof, nothing to deduplicate against yet"
+        )
+    else:
+        links_before = conn.execute(
+            "SELECT COUNT(*) AS n FROM execution WHERE run_id = ? AND status = 'created'", (run_id,)
+        ).fetchone()["n"]
+
+        print()
+        print(f"re-running episode {FAULT_EPISODE_INDEX} ({failed_episode.payment_id}) "
+              "to prove idempotency...")
+        rerun_result = inner_executor.create_recovery_link(
+            episode=failed_episode,
+            action=PLACEHOLDER_ACTION,
+            policy_rule_id=PLACEHOLDER_POLICY_RULE,
+            run_id=run_id,
+        )
+        links_after = conn.execute(
+            "SELECT COUNT(*) AS n FROM execution WHERE run_id = ? AND status = 'created'", (run_id,)
+        ).fetchone()["n"]
+        new_links = links_after - links_before
+
+        print(f"re-run {failed_episode.payment_id} -> idempotency key {key} matches -> "
+              f"{rerun_result.status} -> {new_links} new links created")
 
     print()
-    print(f"re-running episode {FAULT_EPISODE_INDEX} ({failed_episode.payment_id}) "
-          "to prove idempotency...")
-    rerun_result = inner_executor.create_recovery_link(
-        episode=failed_episode,
-        action=PLACEHOLDER_ACTION,
-        policy_rule_id=PLACEHOLDER_POLICY_RULE,
-        run_id=run_id,
-    )
-    links_after = conn.execute(
-        "SELECT COUNT(*) AS n FROM execution WHERE run_id = ? AND status = 'created'", (run_id,)
-    ).fetchone()["n"]
-    new_links = links_after - links_before
-
-    print(f"re-run {failed_episode.payment_id} -> idempotency key {key} matches -> "
-          f"{rerun_result.status} -> {new_links} new links created")
-
-    client.close()
-    conn.close()
+    print("cancelling every link this run created (frees their reference_id for the next take)...")
+    successes, failures = rollback_run(conn, client, run_id)
+    print(f"rollback: cancelled {len(successes)}/{len(successes) + len(failures)} link(s)")
+    if failures:
+        print(f"rollback FAILED for: {failures}")
+        return 1
     return 0
 
 

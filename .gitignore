@@ -27,3 +27,8 @@ second_rail.db
 # committed excerpt (evidence/audit_sample.jsonl) is added in Phase 18.
 evidence/audit/*.jsonl
 !evidence/audit/.gitkeep
+
+# scripts/rehearse.py's working copy of the pinned take, regenerated from
+# demo/episode_order.json + data/train.jsonl on every run — not itself
+# evidence.
+demo/_pinned_take.jsonl

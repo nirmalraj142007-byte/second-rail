@@ -23,6 +23,339 @@ first: a build log that only records what worked is a press release.
 - [D6 (later) - 30 Aug 2026](#d6-later--30-aug-2026) - wrote meta-commentary into the selection prompt promising the model would never see a cap or a ceiling. The word "cap" in that sentence failed the forbidden-token test immediately.
 - [D6 (attribution) - 30 Aug 2026](#d6-attribution--30-aug-2026) - twice: assumed the Payment Link cap was still exhausted and built the module around fixtures, then leaked a rupee glyph into a parser regex and tripped the repo's own money-literal grep.
 - [D9 (judge-gap closure) - 2 Sep 2026](#d9-judge-gap-closure--2-sep-2026) - went in believing Razorpay Support had raised the test-mode link cap to unlimited. No record of that exists anywhere in this repo; the cap reset on its own and I cannot say why.
+- [D10 (rehearsal) - 4 Sep 2026](#d10-rehearsal--4-sep-2026) - assumed `scripts/failure_demo.py`'s own throwaway-DB reset was enough to make three consecutive real runs identical. It resets the local database; it does not reset what Razorpay itself remembers about the `reference_id`s that database produces, and the second real run failed almost entirely on HTTP 400 "already exists" instead of the intended fault-injection flow.
+
+## D10 (rehearsal) — 4 Sep 2026
+
+Phase 20: rehearse the demo script beat by beat against the frozen build,
+fix every rough edge it exposes, then freeze at `v1.0-freeze`. No new
+product features this session — every fix below is either a config-level
+change, a fix to a script that was already meant to be non-interactive/
+idempotent and demonstrably wasn't, or documentation. `scripts/rehearse.py`
+is new: it drives the beat sheet, times each beat against target, and
+preflights `demo/episode_order.json` against the live config/data before
+the unbroken take runs.
+
+**Pinning the demo episode set — the first real finding, before the
+rehearsal harness even ran anything.** The obvious design was one plain
+"auto tier" episode to open the stream, then the `>₹5,000` approval
+episode, then the outage cluster. Checked before committing to it, not
+assumed: a real `PolicyEngine.resolve()` pass (not just the gate's own
+amount-vs-ceiling tier, which is a *different* field — `GateDecision.
+escalation_tier` is amount-only, but the tier that actually gates the
+approval prompt in `Runner.run()` is `PolicyMatch.escalation_tier` from the
+*policy table* resolution) showed only 4 of the 108 gate-eligible train
+episodes match one of the 27 explicit policy rules at `auto` tier at all —
+everything else falls to `default_rule`, which is `human_keystroke`
+unconditionally, regardless of amount. None of those 4 auto-tier episodes
+has an `episode_id` below the outage cluster's start (`epi_00008`), so none
+of them can ever play before the cluster halts the run (`load_episodes()`
+sorts by `episode_id`, and `Runner.run()` stops the instant the cluster
+escalates). The two candidates that *do* sort early — `epi_00001` and
+`epi_00006` — both resolve `human_keystroke`, one of them (`epi_00001`,
+Rs 2,875, under the ceiling) for a reason that has nothing to do with the
+rupee threshold the beat is supposed to demonstrate. Opening with it would
+have shown two approval prompts before the cluster and quietly
+misrepresented "gets a human keystroke above a rupee threshold" — the
+README's own words — as this episode's reason for gating when it
+demonstrably was not. `demo/episode_order.json` uses one episode
+(`epi_00006`, Rs 7,500, real amount — the beat sheet's illustrative
+"Rs 12,400" does not correspond to any pinned episode and must not be
+spoken on camera) as both the drill-down and the approval beat.
+
+**Bug 1 — the shared `second_rail.db` makes a second take of the pinned
+set silently do nothing.** First real run of the unbroken-take beat: 0
+eligible, 42 suppressed, every one `duplicate_episode_this_run`. Not a
+gate bug — `check_duplicate` was doing exactly its job. `second_rail.db`
+accumulates every episode any `make eval` / `make demo` / `make gate-run`
+has ever inserted, across the whole project's history, and the fixed
+`episode_ids` in `episode_order.json` are fixed for exactly the reason a
+retake needs them to be. Once inserted, they can never gate-pass again
+against that database. Fix: `scripts/rehearse.py`'s unbroken-take beat runs
+`scripts/demo.py` against a dedicated, reset-every-run database
+(`evidence/demo_take.db`), the same pattern `scripts/failure_demo.py`
+already uses for the identical reason — via `DB_PATH`, an existing config
+knob (`src/config.py`'s `Settings.db_path`), not a new one.
+
+**Bug 2 — `request_approval()`'s non-interactive detection is unreliable
+on this platform, and it is load-bearing for the submission gate, not just
+this rehearsal.** Timed the unbroken-take beat with 2 pinned episodes
+(1 human_keystroke): 63.6 real seconds. `LiveRunView.request_approval()`
+(`src/ui/live.py`) checks `sys.stdin.isatty()` to decide whether to block
+on a real keypress (60s timeout) or queue the episode instantly. On this
+box, that check reports `True` — genuinely interactive — for a child
+process whose stdin was redirected from `/dev/null` (shell), set to
+`subprocess.DEVNULL` (Python), or left inherited under `capture_output=
+True`; only a real anonymous OS pipe (`subprocess.run(..., input="")`)
+makes it correctly report `False`. Reproduced directly, isolated from
+every product code path: `python -c "import sys; print(sys.stdin.isatty
+())"` prints `True` under all three of the first shapes and `False` only
+under the fourth. This is a Windows/ConPTY behaviour, not a bug in this
+repo's own isatty check — but it matters here because
+`scripts/judge_check.py`'s `run_command()` shells out `make demo`
+(300s timeout, no `--limit`) as part of `make judge-check`'s default,
+non-`--skip-slow` path, against a **freshly cloned** database with none of
+today's accumulated duplicate-suppression — the exact condition under
+which every `human_keystroke` episode blocks the full 60s instead of
+queuing. `make clean-clone-test` runs `make judge-check` on precisely such
+a clone. Given the sealed-split escalation-tier split noted elsewhere in
+this log (`human_keystroke` is the large majority, not a minority tier),
+this was one real `409`s away from making `make clean-clone-test` — and by
+extension a judge's own `make demo --dry-run`, part of the S-01 acceptance
+gate — take hours instead of minutes on any environment with this same
+isatty quirk. Fix: `run_command()` now passes `input=""`, forcing the one
+stdin shape that reports correctly; `scripts/rehearse.py`'s own command
+beats do the same by default, with an opt-in (`interactive_stdin=True`,
+used only for the unbroken take) that lets a real presenter's real
+keypress through when this harness is actually run at a tty. No product
+code changed — both fixes are entirely in how these two scripts invoke
+their own subprocesses.
+
+**Bug 3 (the wrong-turn) — `make failure-demo`'s reset logic resets the
+wrong thing.** R4's instruction was to run it three times consecutively
+and confirm identical output, or fix the reset logic if not. Run 2 of 3
+came back almost entirely HTTP 400 `BAD_REQUEST_ERROR`, "payment link with
+given reference_id: sr-... already exists", on episodes 1-5 — episodes the
+fault plan never touches at all (the deliberate 429 is injected at index
+7 only). `evidence/failure_demo.db` **is** reset every run (confirmed by
+reading the module docstring and the code before assuming otherwise), so
+the first hypothesis — the reset logic is simply missing — was wrong.
+What actually happens: `reference_id` is `sha256(payment_id + ':' +
+policy_rule_id)`, and both inputs are fixed on purpose (the same 12
+episodes, `PLACEHOLDER_POLICY_RULE = "P-00"`) so a retake lands on the same
+episodes. That determinism is exactly what makes the `reference_id` the
+same string on every invocation — and Razorpay's test-mode account
+remembers a `reference_id` across every run that has ever used it, not
+just within one. The local DB reset has nothing to do with that. Confirmed
+directly against the live API before writing any fix: created a link with
+a reference_id, cancelled it, and re-created a link with the *same*
+reference_id — HTTP 200, a new `plink_` id. Cancelling frees it. Fix:
+`scripts/failure_demo.py` now cancels every link it creates
+(`src/execute/rollback.py`'s `rollback_run()`, reused, not duplicated) as
+its last step, every run — this is what actually makes three consecutive
+real takes behave identically, not the DB reset, which only ever addressed
+the local half of the state. Also cleaned up 6 real links left over from
+today's earlier (pre-fix) runs, found by computing the 12 pinned episodes'
+reference_ids and paging `list_payment_links` for them directly.
+
+**Bug 4, found while fixing Bug 3 — the audit writer gets closed before
+code that still needs it, on a path only real API pressure exercises.**
+While verifying the Bug 3 fix, a *different* real condition (see below)
+pushed `consecutive_executor_errors` to threshold at episode 3 — three
+real, unrelated 429s, nothing to do with the deliberate fault at episode
+7 — which makes `Runner.run()`'s own stopping rule fire and `break` before
+episode 7 is ever reached. `failure_demo.py`'s structure was `try: ...
+runner.run(...) finally: audit.close()`, then, *after* that block, an
+unconditional manual call to `inner_executor.create_recovery_link()` for
+episode 7 to prove idempotency — which still writes through the same
+(now closed) audit writer. `ValueError: I/O operation on closed file`,
+uncaught, full traceback on stage. Fix: `audit.close()` now wraps both the
+runner's batch loop and the manual re-run call, and the re-run itself is
+guarded on whether episode 7's `gate_check` row actually exists yet
+(i.e., whether the run got that far) — skipped with a clear message
+instead of attempted against an episode with nothing to deduplicate
+against, if not.
+
+**Disclosed, not fixed — sustained testing against the same real account
+produces real rate-limiting that can land on episodes the fault plan never
+touches.** After the Bug 3 fix, three further consecutive real runs: two
+clean (structurally identical: same episode indices created, same backoff
+pattern at episode 7, same idempotency proof, 5/5 rollback), one hit real
+429s at episodes 6 and 8 as well as the deliberately-faulted 7 — genuine
+Razorpay-side throttling from the volume of real calls this rehearsal
+session alone has made, the same dynamic `evidence/report.md` already
+names for `guardrail_proof.json` ("sustained real-API calls at volume
+produce sporadic Razorpay-side rate-limiting that isn't a systemic failure
+signal"). This is not a bug this script can fix — it is the real API's own
+behaviour under load, correctly handled by the retry/backoff/stopping-rule
+machinery every time it happened. What it changes is which episode indices
+visibly fail on camera. Documented in `demo/script.md`'s beat notes:
+leave a real gap (60-90s, not back-to-back) between failure-demo retakes
+during the actual recording session, since this rehearsal session's own
+back-to-back cadence is a worse case than a presenter re-setting up a shot
+between takes.
+
+**Net effect on the "three identical runs" acceptance test:** 3 of 4 real
+consecutive runs after the Bug 3 fix were structurally identical
+(normalized for run_id/plink_id/timestamps); the 4th diverged only in
+*which* episodes hit a real, external, correctly-handled 429, not in any
+locally-reset state. Before the fix, this was 1 of 2 (the very first run
+this session, before any accumulated `reference_id`s existed to collide
+with).
+
+**Scope correction mid-session: the 5:00 expansion, not the 3:00 spine.**
+`scripts/rehearse.py` was built against CLAUDE.md's literal 3:00 beat
+table. Caught mid-session, before recording: the blueprint's own §8 states
+the judge file allows five minutes and the 3:00 cut "leaves 40% of airtime
+unspent," and names four specific insertions (`make harvest` on screen,
+the threshold-experiment plot, a live `make rollback`, one `BUILD_LOG.md`
+entry read aloud) plus 10s of breathing room in the unbroken take. Added
+all four as real beats — `make harvest` (resumable, ~13s real against the
+already-complete manifest, not a multi-hour re-harvest), `experiments/
+thresholds/auto_approve.md` on screen, `make rollback RUN_ID=<the
+unbroken take's own run_id>`, and the "Wrong turns" index for the
+presenter to pick a real entry from — rather than four narrated-only
+placeholders. Full 5:00 rehearsal, real calls, non-interactive:
+
+| beat | target | actual |
+|---|---|---|
+| hook | 8.0s | untimed (narration) |
+| seam_diagram | 17.0s | untimed (narration) |
+| head_report | 10.0s | 0.0s |
+| harvest_expansion | 35.0s | 13.1s |
+| unbroken_take | 65.0s | 5.0s |
+| cluster_refusal | 10.0s | untimed (narration) |
+| boundary_files | 15.0s | 0.1s |
+| threshold_expansion | 30.0s | 0.0s |
+| verify_seal_and_report | 20.0s | 0.2s |
+| rollback_expansion | 25.0s | 1.2s |
+| failure_demo | 22.0s | 35.8s (OVERRUN) |
+| verify_audit | 13.0s | 2.5s |
+| build_log_expansion | 20.0s | untimed (narration) |
+| close | 5.0s | untimed (narration) |
+
+Total target 295s (4:55, 5s under the 5:00 ceiling). `failure_demo`
+overran again on this pass — under the same sustained real-API pressure
+disclosed above (this session alone has made well over a dozen real
+`failure-demo` invocations today; a presenter's actual retake cadence
+won't). Every command beat that can be timed automatically was; the four
+narration beats (hook, seam diagram, cluster refusal, close) and the new
+`build_log_expansion` beat need a real presenter at a real tty for a real
+timing — `scripts/rehearse.py` shows a live countdown and waits for Enter
+in that mode, deliberately not faking a number for a human's own delivery.
+
+**R1 (tunnel).** `make watch RUN_ID=x --poll` — the mechanism itself is
+sound: with nothing yet to attribute (this session's automated runs never
+complete a real interactive approval, so nothing gets executed to attribute
+against), it returns in 1.7-5.0s across three real invocations, well
+inside its own 60s test timeout. Recommendation adopted: `POLL=1` is the
+default for the unbroken-take beat's attribution step in
+`scripts/rehearse.py` — the tunnel is mentioned verbally on camera, never
+on the critical path. **Not exercised this session:** a real customer-side
+checkout completion (paying the created link) — that step needs a live
+browser session against Razorpay's hosted checkout, which is the
+presenter's own action during the actual take, not something this
+rehearsal pass automated. The poll mechanism's correctness on an actually
+*paid* link is therefore unverified by this session specifically, though
+`src/attribute/watcher.py`'s polling path is exercised elsewhere (`make
+eval`'s fixture executor, `tests/`).
+
+**R2 (test instruments) — and a second, more serious bug found doing it.**
+Two checks on the strings themselves: (1) re-ran `python -m
+scripts.harvest_errors` for real — resumable by design, it created
+exactly one new Payment Link (a documented scenario,
+`transaction_limit_exceeded`, that had none yet) and reconfirmed the
+existing 20 captured failures and 6 still-awaiting-manual-checkout, no
+drift. (2) ran every one of the 20 committed
+`evidence/harvested_errors.jsonl` records back through the *current*
+`RegexBaseline` — 19/20 still unmatched, i.e. still 5.0% regex accuracy,
+matching `evidence/report.md`'s committed figure exactly. No Razorpay doc
+drift detected against this project's own anchors.
+
+That much was the intended R2 check. What it surfaced instead: `pytest -m
+"not live"` immediately after (routine, not part of R2's own instructions
+— just checking nothing this session had touched was broken) came back
+**11 failing tests, all in `test_generator.py`**, all
+`ValueError: class C1 has no shared (train-eligible) harvested anchor`.
+Traced, not guessed at: `data/generator.py`'s `SEALED_ONLY_HARVEST_IDS`
+hardcodes 11 specific `harvest_id` strings from the original harvest run,
+pinning them to the sealed split only — and
+`scripts/harvest_errors.py`'s `_write_harvested()` assigned a **fresh
+ULID to every record's `harvest_id` on every write**, with no memory of
+what it wrote last time. My own re-run above had just silently orphaned
+the entire pinned frozenset — confirmed directly: `git diff` on
+`evidence/harvested_errors.jsonl` showed every `harvest_id` replaced,
+none of them matching `SEALED_ONLY_HARVEST_IDS` any more.
+
+Restored the working tree to the last committed state first (`git
+checkout HEAD --` on the four evidence files this and an earlier,
+already-uncommitted session had touched — `harvested_errors.jsonl`,
+`harvest_manifest.json`, `exceptions_sample.md` (a byproduct of this
+session's own repeated `make demo` test runs, confirmed by its run_id
+matching one of mine), and `razorpay_field_report.md`, which turned out
+to need the same restoration for an unrelated reason below) — 195/195
+tests passing again before touching any code.
+
+**Fixed structurally, not patched for today's specific IDs.**
+`_write_harvested()` now reads the existing `evidence/harvested_errors.jsonl`
+first, keys a `payment_id -> harvest_id` map from it (`payment_id` is the
+real Razorpay id, immutable), and reuses that `harvest_id` for any record
+it already has one for — a fresh ULID is only ever generated for a
+genuinely new `payment_id`. This is the general rule, not one instance of
+it: proved by re-running `make harvest` a *second* time, deliberately,
+after applying the fix, and diffing `harvest_id` values against the
+committed file — byte-identical, confirmed with a direct diff, not
+inferred. Full suite green after, both times. Any future re-run of `make
+harvest` — including one accidentally triggered during the actual
+recording — now cannot repeat this failure mode.
+
+**A second, different hazard, found investigating the first — not fixed,
+because it can't be safely.** `evidence/razorpay_field_report.md` also
+came back modified after both harvest re-runs. Different root cause:
+`_write_field_report()` unconditionally rewrites the whole file from a
+template on every run, and the *committed* file has real, hand-written
+narrative sections (the "Update, Phase 8" / "Update, Phase 17" paragraphs
+telling the actual rate-limit chase) that the current template does not
+reproduce — a real re-run silently replaces documented history with a
+terser generated version. Unlike `harvest_id`, there's no safe automatic
+fix here: reconstructing that prose programmatically would mean guessing
+at a historical record, which is worse than leaving it as a disclosed
+hazard. Restored to committed state; a loud warning now sits at both the
+module docstring and the exact `write_text()` call in
+`scripts/harvest_errors.py`, telling any future caller (including my own
+next session) to diff and `git checkout` this specific file after any
+real re-run. Logged as `KNOWN_ISSUES.md` Issue 6.
+
+**R3 (LLM) — a real gap, found and only partly mitigated.** "Unset
+LLM_API_KEY and run the demo" surfaced two different behaviours depending
+on `LLM_PROVIDER`: with `LLM_PROVIDER=none` (a fresh clone's actual
+default), `NullClient` is only ever constructed, never a crash by itself.
+With `LLM_PROVIDER` still pointed at a real provider (groq, this box) but
+the key empty — the realistic "key went missing right before the take"
+scenario R3 is actually testing — `build_llm_client()` raises `ConfigError`
+eagerly, at construction, in `scripts/demo.py` before a single episode is
+processed. That much is arguably correct fail-loud behaviour for a
+genuine misconfiguration. The deeper finding: even with `LLM_PROVIDER=
+none` cleanly, a **cache miss in `ActionSelector.select()` (src/choose/
+selector.py) is not caught** — only `LLMCallError` degrades to
+`_fallback_selection()`; `NullClient`'s `ConfigError` propagates uncaught,
+crashing the run. `src/diagnose/classifier.py`'s docstring documents the
+identical choice for the *diagnose* stage deliberately ("a genuine setup
+mistake that should stop the run loudly") — reasonable there because this
+project's regex baseline resolves synthetic data with no LLM call needed
+at all. Choose has no equivalent guarantee: every eligible episode needs
+an LLM-or-fallback answer, and the fallback path (`fallback_priority` in
+`config/policy_table.yaml`) exists and works — it just isn't reached from
+`ConfigError`, only from `LLMCallError`. Reproduced directly, isolated
+from the demo script: `ActionSelector.select()` against a real, empty
+`DiskCache` and a `NullClient` raises `ConfigError` uncaught, confirmed
+by calling it directly, not by reading the code and assuming.
+
+**Not patched this session — flagged, not fixed.** `src/choose/
+selector.py` is one of the two modules the LLM is allowed to touch
+(CLAUDE.md), so changing its error handling isn't out of bounds the way
+`src/gate/execute/attribute/audit` would be — but it's a real product
+design call (is a missing key at choose-time "genuine misconfiguration,
+stop loud" the same way diagnose treats it, or "transient, degrade like
+LLMCallError does"?) that deserves a decision, not a rehearsal-session
+patch. Logged in `KNOWN_ISSUES.md` (Issue 5). What this session *did* add:
+a third preflight assertion in `scripts/rehearse.py` — before the unbroken
+take runs, it actually calls diagnose+choose for the pinned approval
+episode against the real, committed cache and reports whether each call
+was a genuine cache hit or would depend on a live LLM call, rather than
+hoping the cache is warm. Confirmed warm for the current pinned set:
+`epi_00006` resolves diagnose by regex (no LLM at all) and choose via a
+real cache hit — this specific take is safe from the gap above even
+though the underlying code path isn't fixed. This is exactly the
+pre-warming R3 asked for, made into a repeatable check instead of a
+one-time manual confirmation.
+
+**R5 (approval).** Observed the 60s auto-reject fire correctly and
+repeatedly across this session's testing (every non-interactive
+`human_keystroke` episode before the stdin fix, several more
+deliberately after) — always resolves `approval_timeout`, auto-rejects,
+never hangs past the 60s deadline. Confirms `LiveRunView.approval_prompt()`'s
+hard wall-clock deadline holds regardless of what's read from stdin.
 
 ## D1 — 25 Aug 2026
 

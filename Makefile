@@ -19,7 +19,7 @@ else
 	PIP := $(VENV_BIN)/pip
 endif
 
-.PHONY: setup doctor lint test test-live clean data seal verify-seal eval demo approve demo-states verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve webui tunnel replay-webhooks gate-run failure-demo failure-demo-backup guardrail-proof classify choose-run watch thresholds judge-check secrets-audit dep-audit clean-clone-test scrub-cache artifact-scan check-architecture judge-quickstart
+.PHONY: setup doctor lint test test-live clean data seal verify-seal eval demo approve demo-states verify-audit verify-audit-tamper rollback harvest migrate db-check config-check serve webui tunnel replay-webhooks gate-run failure-demo failure-demo-backup guardrail-proof classify choose-run watch thresholds judge-check secrets-audit dep-audit clean-clone-test scrub-cache artifact-scan check-architecture judge-quickstart rehearse
 
 setup:
 	$(PYTHON311) -m venv .venv
@@ -288,3 +288,13 @@ check-architecture:
 # check this in 90 seconds" section.
 judge-quickstart:
 	$(PY) scripts/judge_quickstart.py
+
+# Phase 20 — drives the 3:00 demo script beat by beat against real make
+# targets and real committed files, timing each one and flagging
+# overruns. Preflights demo/episode_order.json against live config/data
+# before the unbroken take runs; aborts loudly rather than recording into
+# a beat that no longer lands where the script says it does. EXECUTE=0
+# swaps the unbroken take to dry-run; SKIP_SLOW=1 skips it and
+# failure-demo entirely for fast iteration on the harness itself.
+rehearse:
+	$(PY) -m scripts.rehearse $(if $(filter 0,$(EXECUTE)),--dry-run) $(if $(SKIP_SLOW),--skip-slow)
