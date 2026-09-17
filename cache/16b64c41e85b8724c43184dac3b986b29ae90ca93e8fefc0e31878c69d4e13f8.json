@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-09-17T09:37:37+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "16b64c41e85b8724c43184dac3b986b29ae90ca93e8fefc0e31878c69d4e13f8",
+  "response": "{\"class_id\":\"C4\",\"confidence\":0.85,\"rationale\":\"error_reason is authentication_failed, indicating a dynamic authentication failure.\",\"features_used\":[\"error_reason\"]}",
+  "usage": {
+    "input_tokens": 1152,
+    "output_tokens": 121
+  }
+}

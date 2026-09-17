@@ -177,8 +177,9 @@ thresholds:
 
 # SPLIT=train|sealed (required). Regex-vs-LLM head-to-head, coverage, cost,
 # self-graded + externally-anchored classification metrics. Writes
-# evidence/classification_metrics.json. Cached LLM responses make a second
-# run of the same split free of both LLM calls and network access.
+# evidence/classification_metrics_$(SPLIT).json -- one file per split, so
+# a sealed run never overwrites a train run. Cached LLM responses make a
+# second run of the same split free of both LLM calls and network access.
 classify:
 	$(PY) -m scripts.classify --split $(SPLIT)
 

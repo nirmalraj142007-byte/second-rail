@@ -869,17 +869,24 @@ def jg13(*, skip_slow: bool) -> tuple[bool, str]:
         shutil.rmtree(basetemp, ignore_errors=True)
 
 
+HEAD_CHECK_LINES = 45  # must match README.md's own "How to check this in 90
+# seconds" table row and scripts/judge_quickstart.py's step — all three name
+# the same number for a reason, see BUILD_LOG.md's Phase-20-followup entry.
+
+
 def jg14() -> tuple[bool, str]:
     """Reversibility, stated as a heading a judge cannot miss."""
     if not README_PATH.exists():
         return False, "README.md does not exist, so the reversibility heading cannot be there"
     lines = read(README_PATH).splitlines()
-    head = "\n".join(lines[:40])
+    head = "\n".join(lines[:HEAD_CHECK_LINES])
     m = MONEY_HEADING_RE.search(head)
     if m is None:
         anywhere = MONEY_HEADING_RE.search("\n".join(lines))
         if anywhere is not None:
-            return False, "the heading exists but not within README.md's first 40 lines"
+            return False, (
+                f"the heading exists but not within README.md's first {HEAD_CHECK_LINES} lines"
+            )
         return False, "README.md has no 'No code path in Second Rail moves money' heading"
     lineno = head[: m.start()].count("\n") + 1
     return True, f"README.md:{lineno} {m.group(0).strip()!r}"

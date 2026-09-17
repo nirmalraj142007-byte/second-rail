@@ -1,5 +1,5 @@
 # Second Rail — Results
-Run `01M1HFCGP0EVKTQVFARXX580V8` · `c7ff53b` · config `9e22c9aa673f…` · 2026-09-02T22:01:56+05:30
+Run `01M2QFFVZ161GCN3CMV838KK2Q` · `ea6bd92` · config `9e22c9aa673f…` · 2026-09-17T16:14:54+05:30
 Sealed split: sha256 verified — 200 episodes (see `holdout/SEAL.sha256`) · shift: BANK_E is reserved for the sealed split only.
 
 Attribution rule AR-01, window 48h.
@@ -24,7 +24,7 @@ Stopping rule `consecutive_executor_errors` fired this run — only 10/108 reque
 | idempotency collisions correctly detected | 10/10 | — |
 | links created and cancelled | 5 | every link this proof created |
 
-5 link(s) on the real Razorpay API carry notes.run_id='01M1HEV5580ZXWYFJ11DJA50EQ', vs 5 distinct idempotency key(s) recorded locally
+5 link(s) on the real Razorpay API carry notes.run_id='01M1E9KZGGD75A0DB1YP7H14P7', vs 5 distinct idempotency key(s) recorded locally
 
 ### Action admissibility rate
 
@@ -36,7 +36,7 @@ Stopping rule fired this run: `cap_breach` — the batch was 200 episodes, 131 w
 
 ### Throughput and LLM cost
 
-Throughput: 1310.0 episodes/min over 131 of 200 sealed episodes processed.
+Throughput: 1264.1 episodes/min over 131 of 200 sealed episodes processed.
 
 LLM cost this run (cache-aware, 0 paise on every cache hit): Rs 0.00 (measured), Rs 0.00 (measured) per 100 episodes.
 
@@ -67,11 +67,23 @@ Separately (self-generated data, not externally anchored — see the top-5 error
 | card_declined | 50 | 100.0% | 100.0% (n=8) |
 | card_number_invalid | 39 | 100.0% | 100.0% (n=8) |
 
+### How big is the tail the LLM actually earns its place on?
+
+"The model only earns its place on the unmatched tail" (section 1) is a claim about coverage, not accuracy — sized here directly (`scripts/tail_size_analysis.py`), reusing `scripts/classify.py`'s own production cascade unmodified. Accuracy below is graded on the tail alone, not blended with the regex-resolved majority, so it is a harsher, more specific number than section 2's whole-source accuracy figures above.
+
+| source | n | regex leaves unmatched | LLM accuracy on that tail | real cost / 100 episodes |
+|---|---|---|---|---|
+| train (n=400) | 400 | 0 (0.0%) | n/a (tail empty) | Rs 0.00 (measured) |
+| sealed (n=200) | 200 | 5 (2.5%) | 100.0% | Rs 0.03 (measured) |
+| harvested (n=20) | 20 | 19 (95.0%) | 15.8% | Rs 0.95 (measured) |
+
+Train's tail is empty by construction (section 1's 100% regex coverage is a generator property, not a finding — see `src/diagnose/baseline.py`), so the LLM is never called on it and costs nothing. On the harvested strings specifically, the tail is nearly the whole source (19/20) and the LLM's accuracy graded on exactly that tail is lower than section 2's blended figure for the same source — the one episode regex does resolve there was also one the LLM happened to get right when queried independently in section 2's methodology, which flatters the blended number slightly. On sealed, the tail is small (2.5% of the batch) and the LLM handles it cleanly — the closest thing in this report to the tail actually being worth its cost.
+
 ## 4. Design target under stated assumptions
 
 This is a simulator. Every figure below passes through the customer-response model in `outcome_model.md`; sections 1-3 above do not.
 
-Sensitivity sweep, +/-30% on three parameters: response probability, attribution window, goodwill proxy (false-positive cost).
+Sensitivity sweep, +/-30%, on 2 parameter(s) that actually move this number: response probability, goodwill proxy (false-positive cost). A third, pre-registered parameter (attribution window) is swept too, for disclosure completeness, but is structurally non-applicable to this figure, not silently dropped — see below.
 
 - **response probability**: outcome_model.md §2's per-class base rate and its segment/amount multipliers are all named assumptions, not measurements — the single most load-bearing unmeasured number in the recovery figure.
 - **attribution window**: outcome_model.md §3 states 48h was chosen by reasoning from the 72h action-age cap, not by fitting a real payment_link.paid latency distribution — no such distribution existed to fit.
@@ -96,6 +108,19 @@ gross Rs 51,427 - Rs 95,464 | false-positive cost Rs 11 - Rs 20 (1 contact(s)) |
 Recovery is computed as an expected value — Sigma(response_probability x amount_paise) over episodes this run actually contacted — using the sealed split's per-episode response_probability field (outcome_model.md's formula, assigned once per episode), not a resampled boolean draw. This number passes through an outcome model I wrote; sections 1-3 do not.
 
 This sweep perturbs my own parameters and widens a band around a quantity I invented. It is disclosure, not evidence. Sections 1-3 are the evidence.
+
+### Efficiency, per contact
+
+**Second Rail**: Rs 520 - Rs 965 NET per contact, across 99 contact(s).
+
+**FIXED_RETRY_AT_T30 baseline (Runner's gate-only fallback: every gate-eligible episode gets `placeholder_action`/`P-00`, unconditionally)**: Rs 504 - Rs 936 NET per contact, across 102 contact(s).
+
+**Why the gate-eligible counts differ (108 vs 102), even though both runs apply the identical 7-check gate to the identical sealed batch:** the per-run exposure cap (`amount_cap`, `config/guardrails.yaml`) only accrues for episodes actually committed to — Second Rail chose `no_action` on 9 gate-eligible episode(s), and `src/runner.py` deliberately excludes those from the exposure accumulator (a no_action episode is never really contacted), so the cap takes longer to trip and the run reaches further into the batch before stopping. The baseline's `placeholder_action` is never `no_action`, so every eligible episode counts against the cap immediately. This is a real mechanism, not a bug — confirmed by querying both runs' own databases, not inferred.
+
+**Counted, not modeled** — unlike the rupee figures above, nothing below passes through `outcome_model.md`; these are direct counts over the sealed batch and the two runs' own recorded decisions.
+
+- **Contacts avoided**: Second Rail contacts 3 fewer customer(s) than the baseline (2.9% fewer) — net of 9 episode(s) it actively chose `no_action` on against 6 additional episode(s) it reached that the baseline's faster exposure-cap accrual never got to (see the note above).
+- **Against a genuinely gate-free policy** — contact every one of the 200 sealed episodes unconditionally, no opt-out check, no quiet hours, no exposure cap (not the baseline above, which already runs the same gate as Second Rail — see `scripts/efficiency_analysis.py`): the gate prevents 0 opt-out contact(s) (0.0%), 36 quiet-hour contact(s) (18.0%), and 97 cap-breaching contact(s) (48.5%).
 
 ## 5. Exceptions
 

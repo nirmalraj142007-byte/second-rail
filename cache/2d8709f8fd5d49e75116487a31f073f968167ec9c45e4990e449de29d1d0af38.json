@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-09-17T09:50:02+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "2d8709f8fd5d49e75116487a31f073f968167ec9c45e4990e449de29d1d0af38",
+  "response": "{\"class_id\":\"C3\",\"confidence\":0.9,\"rationale\":\"error_reason is card_number_invalid, indicating a data-entry problem with the static credential.\",\"features_used\":[\"error_reason\"]}",
+  "usage": {
+    "input_tokens": 1156,
+    "output_tokens": 101
+  }
+}

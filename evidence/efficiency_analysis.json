@@ -1,0 +1,22 @@
+{
+  "batch_size": 200,
+  "cap_breach_prevented": {
+    "count": 97,
+    "first_breaching_episode_id": "epi_00504",
+    "fraction_of_batch": 0.485,
+    "reason_code": "exposure_ceiling_exceeded"
+  },
+  "method": "opt_out and quiet_hours: independent per-episode check over the full 200-episode batch, no other check or stopping rule applied. exposure cap: real simulation of contacting all 200 episodes unconditionally, in Runner.run()'s own processing order, summing amount_paise and applying check_amount_cap's real comparison at each step. This is not the FIXED_RETRY_AT_T30 baseline (which already runs the same gate) \u2014 it is the hypothetical this project never actually runs: no gate at all.",
+  "opt_out_prevented": {
+    "count": 0,
+    "episode_ids": [],
+    "fraction_of_batch": 0.0,
+    "reason_code": "customer_opted_out"
+  },
+  "per_run_exposure_ceiling_paise": 20000000,
+  "quiet_hours_prevented": {
+    "count": 36,
+    "fraction_of_batch": 0.18,
+    "reason_code": "quiet_hours_block"
+  }
+}

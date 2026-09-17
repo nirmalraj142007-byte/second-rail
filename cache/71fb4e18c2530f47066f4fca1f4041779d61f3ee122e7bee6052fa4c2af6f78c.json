@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-09-17T10:06:50+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "71fb4e18c2530f47066f4fca1f4041779d61f3ee122e7bee6052fa4c2af6f78c",
+  "response": "{\"class_id\":\"C5\",\"confidence\":0.95,\"rationale\":\"error_reason pin_attempts_exceeded indicates a limit or attempts exceeded issue.\",\"features_used\":[\"error_reason\"]}",
+  "usage": {
+    "input_tokens": 1157,
+    "output_tokens": 73
+  }
+}

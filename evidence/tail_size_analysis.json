@@ -1,0 +1,221 @@
+{
+  "harvested_20": {
+    "accuracy_llm_only_on_tail_self_graded": 0.1579,
+    "accuracy_self_graded": 0.2,
+    "cost_paise_per_100_episodes": 0.0,
+    "cost_rupees_per_100_episodes": 0.0,
+    "coverage_regex_only": 0.05,
+    "llm_cache_hits": 19,
+    "llm_calls_attempted": 19,
+    "llm_resolved": 19,
+    "llm_unavailable_skipped": 0,
+    "n_episodes": 20,
+    "precision_recall_f1_self_graded": {
+      "C1": {
+        "f1": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "support": 1
+      },
+      "C2": {
+        "f1": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "support": 3
+      },
+      "C3": {
+        "f1": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "support": 2
+      },
+      "C4": {
+        "f1": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "support": 1
+      },
+      "C5": {
+        "f1": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "support": 3
+      },
+      "C6": {
+        "f1": 0.5,
+        "precision": 1.0,
+        "recall": 0.333,
+        "support": 3
+      },
+      "C7": {
+        "f1": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "support": 2
+      },
+      "C8": {
+        "f1": 0.273,
+        "precision": 0.158,
+        "recall": 1.0,
+        "support": 3
+      },
+      "C9": {
+        "f1": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "support": 2
+      }
+    },
+    "regex_resolved": 1,
+    "regex_unmatched_fraction": 0.95,
+    "tail_n_episodes": 19,
+    "total_cost_paise": 0,
+    "total_historical_cost_paise": 19
+  },
+  "sealed": {
+    "accuracy_llm_only_on_tail_self_graded": 1.0,
+    "accuracy_self_graded": 1.0,
+    "cost_paise_per_100_episodes": 0.0,
+    "cost_rupees_per_100_episodes": 0.0,
+    "coverage_regex_only": 0.975,
+    "llm_cache_hits": 5,
+    "llm_calls_attempted": 5,
+    "llm_resolved": 5,
+    "llm_unavailable_skipped": 0,
+    "n_episodes": 200,
+    "precision_recall_f1_self_graded": {
+      "C1": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 46
+      },
+      "C2": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 31
+      },
+      "C3": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 17
+      },
+      "C4": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 29
+      },
+      "C5": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 12
+      },
+      "C6": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 20
+      },
+      "C7": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 15
+      },
+      "C8": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 18
+      },
+      "C9": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 12
+      }
+    },
+    "regex_resolved": 195,
+    "regex_unmatched_fraction": 0.025,
+    "tail_n_episodes": 5,
+    "total_cost_paise": 0,
+    "total_historical_cost_paise": 5
+  },
+  "train": {
+    "accuracy_llm_only_on_tail_self_graded": null,
+    "accuracy_self_graded": 1.0,
+    "cost_paise_per_100_episodes": 0.0,
+    "cost_rupees_per_100_episodes": 0.0,
+    "coverage_regex_only": 1.0,
+    "llm_cache_hits": 0,
+    "llm_calls_attempted": 0,
+    "llm_resolved": 0,
+    "llm_unavailable_skipped": 0,
+    "n_episodes": 400,
+    "precision_recall_f1_self_graded": {
+      "C1": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 88
+      },
+      "C2": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 50
+      },
+      "C3": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 39
+      },
+      "C4": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 67
+      },
+      "C5": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 14
+      },
+      "C6": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 35
+      },
+      "C7": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 25
+      },
+      "C8": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 69
+      },
+      "C9": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 13
+      }
+    },
+    "regex_resolved": 400,
+    "regex_unmatched_fraction": 0.0,
+    "tail_n_episodes": 0,
+    "total_cost_paise": 0,
+    "total_historical_cost_paise": 0
+  }
+}

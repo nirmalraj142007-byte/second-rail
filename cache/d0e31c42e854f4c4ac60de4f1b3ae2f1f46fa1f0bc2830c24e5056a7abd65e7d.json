@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-09-17T09:25:38+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "d0e31c42e854f4c4ac60de4f1b3ae2f1f46fa1f0bc2830c24e5056a7abd65e7d",
+  "response": "{\"class_id\":\"C8\",\"confidence\":0.75,\"rationale\":\"error_reason indicates a gateway technical error, matching issuer_bank_technical_error.\",\"features_used\":[\"error_reason\",\"error_source\"]}",
+  "usage": {
+    "input_tokens": 1157,
+    "output_tokens": 112
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-09-17T09:20:02+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "b9f1ec21fd36ac342bfb4c9b87fc6064f659e059cb7a765ccc8b05e8be583dd9",
+  "response": "{\"class_id\":\"C8\",\"confidence\":0.8,\"rationale\":\"error_reason is gateway_technical_error, indicating a gateway-side technical fault.\",\"features_used\":[\"error_reason\"]}",
+  "usage": {
+    "input_tokens": 1155,
+    "output_tokens": 84
+  }
+}

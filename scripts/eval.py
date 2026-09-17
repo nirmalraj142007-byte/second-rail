@@ -83,6 +83,7 @@ from src.report.render import (
     ConfusionCost,
     ExceptionRow,
     ExternallyAnchoredRow,
+    GatePreventedCounts,
     GuardrailProof,
     HeadToHeadRow,
     RecoveryFigure,
@@ -95,12 +96,14 @@ from src.report.render import (
     Section5,
     Section6,
     Section7,
+    TailSizingRow,
     WorkedException,
     render_report,
 )
 from src.report.sensitivity import (
     METHODOLOGY_NOTE,
     PARAM_REASONING,
+    STRUCTURALLY_INERT_PARAMS,
     SWEPT_PARAMS,
     WINDOW_NOTE,
     ContactedEpisode,
@@ -132,7 +135,9 @@ GATE_CEILING_DB_PATH = ROOT / "evidence" / "eval_gate_ceiling.db"
 REPORT_PATH = ROOT / "evidence" / "report.md"
 METRICS_PATH = ROOT / "evidence" / "eval_metrics.json"
 GUARDRAIL_PROOF_PATH = ROOT / "evidence" / "guardrail_proof.json"
-CLASSIFICATION_METRICS_PATH = ROOT / "evidence" / "classification_metrics.json"
+CLASSIFICATION_METRICS_PATH = ROOT / "evidence" / "classification_metrics_train.json"
+EFFICIENCY_ANALYSIS_PATH = ROOT / "evidence" / "efficiency_analysis.json"
+TAIL_SIZE_ANALYSIS_PATH = ROOT / "evidence" / "tail_size_analysis.json"
 HARVEST_PATH = ROOT / "evidence" / "harvested_errors.jsonl"
 
 logger = get_logger("eval")
@@ -655,7 +660,7 @@ def main(
     print("=== section 6: classifier detail over all 200 sealed episodes ===")
     section6 = build_classification_section(bundle, settings, sealed_episodes, labels)
 
-    print("=== sections 2-3: reading evidence/classification_metrics.json ===")
+    print(f"=== sections 2-3: reading {CLASSIFICATION_METRICS_PATH.relative_to(ROOT)} ===")
     # Both sections reuse `make classify`'s already-computed, already-cached
     # numbers rather than re-deriving them: section 2's externally-anchored
     # rows and section 3's regex-vs-LLM head-to-head are general findings
@@ -727,6 +732,39 @@ def main(
     # the comparison, not treated as a 0.
     scored_rows = [r for r in section2.rows if r.llm_accuracy is not None]
     weakest = min(scored_rows, key=lambda r: r.llm_accuracy) if scored_rows else None
+    if not TAIL_SIZE_ANALYSIS_PATH.exists():
+        print(
+            f"ABORT: {TAIL_SIZE_ANALYSIS_PATH.relative_to(ROOT)} not found — "
+            "run `python -m scripts.tail_size_analysis` first.",
+            file=sys.stderr,
+        )
+        raise typer.Exit(code=1)
+    tail_data = json.loads(TAIL_SIZE_ANALYSIS_PATH.read_text(encoding="utf-8"))
+    # Easy-to-hard narrative order, not the JSON's own (alphabetical,
+    # sort_keys=True on write) key order.
+    tail_labels = [
+        ("train", "train (n=400)"),
+        ("sealed", "sealed (n=200)"),
+        ("harvested_20", "harvested (n=20)"),
+    ]
+    tail_sizing = [
+        TailSizingRow(
+            label=label,
+            n_episodes=tail_data[key]["n_episodes"],
+            tail_count=tail_data[key]["llm_resolved"],
+            tail_fraction=tail_data[key]["regex_unmatched_fraction"],
+            tail_llm_accuracy=tail_data[key]["accuracy_llm_only_on_tail_self_graded"],
+            real_cost_paise_per_100=(
+                round(
+                    tail_data[key]["total_historical_cost_paise"]
+                    / tail_data[key]["n_episodes"] * 100, 2,
+                )
+                if tail_data[key]["n_episodes"] else 0.0
+            ),
+        )
+        for key, label in tail_labels
+    ]
+
     section3 = Section3(
         weakest_source_label=weakest.label if weakest else "n/a",
         weakest_n=weakest.n_episodes if weakest else 0,
@@ -738,6 +776,7 @@ def main(
             "batch.)"
         ),
         rows=section3_rows,
+        tail_sizing=tail_sizing,
     )
 
     print("=== section 1: guardrail proof, admissibility, throughput, cost ===")
@@ -853,9 +892,55 @@ def main(
     execution_failed = sr_summary.by_outcome.get("execution_failed", 0)
     section5 = build_exceptions_section(sr_conn, sr_run_id, execution_failed)
 
+    if not EFFICIENCY_ANALYSIS_PATH.exists():
+        print(
+            f"ABORT: {EFFICIENCY_ANALYSIS_PATH.relative_to(ROOT)} not found — "
+            "run `python -m scripts.efficiency_analysis` first.",
+            file=sys.stderr,
+        )
+        raise typer.Exit(code=1)
+    efficiency_data = json.loads(EFFICIENCY_ANALYSIS_PATH.read_text(encoding="utf-8"))
+    gate_prevented = GatePreventedCounts(
+        batch_size=efficiency_data["batch_size"],
+        opt_out_count=efficiency_data["opt_out_prevented"]["count"],
+        opt_out_fraction=efficiency_data["opt_out_prevented"]["fraction_of_batch"],
+        quiet_hours_count=efficiency_data["quiet_hours_prevented"]["count"],
+        quiet_hours_fraction=efficiency_data["quiet_hours_prevented"]["fraction_of_batch"],
+        cap_breach_count=efficiency_data["cap_breach_prevented"]["count"],
+        cap_breach_fraction=efficiency_data["cap_breach_prevented"]["fraction_of_batch"],
+    )
+
+    # Second Rail's gate-eligible count exceeds the baseline's (both run the
+    # identical 7-check gate over the identical sealed batch) because
+    # state.exposure_committed_paise (src/runner.py) only accrues for
+    # episodes actually contacted — a no_action choice commits nothing, so
+    # it never counts against the per-run exposure ceiling the way the
+    # baseline's unconditional placeholder_action always does. Queried
+    # directly, not assumed, so this sentence stays honest if a future run
+    # changes the count.
+    no_action_count = sr_conn.execute(
+        "SELECT COUNT(*) AS n FROM decision WHERE chosen_action = 'no_action'"
+    ).fetchone()["n"]
+    denominator_note = (
+        f"**Why the gate-eligible counts differ ({sr_figure.gate_eligible_count} vs "
+        f"{baseline_figure.gate_eligible_count}), even though both runs apply the identical "
+        "7-check gate to the identical sealed batch:** the per-run exposure cap "
+        "(`amount_cap`, `config/guardrails.yaml`) only accrues for episodes actually "
+        f"committed to — Second Rail chose `no_action` on {no_action_count} gate-eligible "
+        "episode(s), and `src/runner.py` deliberately excludes those from the exposure "
+        "accumulator (a no_action episode is never really contacted), so the cap takes "
+        "longer to trip and the run reaches further into the batch before stopping. The "
+        "baseline's `placeholder_action` is never `no_action`, so every eligible episode "
+        "counts against the cap immediately. This is a real mechanism, not a bug — "
+        "confirmed by querying both runs' own databases, not inferred."
+    )
+
     section4 = Section4(
         second_rail=sr_figure, baseline=baseline_figure, swept_params=list(SWEPT_PARAMS),
+        inert_params=STRUCTURALLY_INERT_PARAMS,
         param_reasoning=PARAM_REASONING, window_note=WINDOW_NOTE, methodology_note=METHODOLOGY_NOTE,
+        gate_prevented=gate_prevented, no_action_count=no_action_count,
+        denominator_note=denominator_note,
     )
 
     section7 = build_section7()

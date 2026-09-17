@@ -60,6 +60,14 @@ PARAM_REASONING: dict[str, str] = {
 
 SWEPT_PARAMS: tuple[str, ...] = tuple(PARAM_REASONING.keys())
 
+# "attribution window" is swept (all three pre-registered parameters are,
+# for disclosure completeness) but never changes the figure below — see
+# WINDOW_NOTE and this module's own docstring for why. Reported as a
+# two-parameter sweep with a third disclosed as structurally
+# non-applicable, not as "three parameters" — that framing implied all
+# three move the number, which only two of them do.
+STRUCTURALLY_INERT_PARAMS: frozenset[str] = frozenset({"attribution window"})
+
 WINDOW_NOTE = (
     "Note on the attribution-window sweep: it is included above for disclosure "
     "completeness (one of the three pre-registered parameters) but is a "

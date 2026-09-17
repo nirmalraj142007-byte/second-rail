@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-09-17T10:03:02+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "f12c74a84a5a5457a416e7e8b657137efb4e46b4c85afabd848b34b66324fd58",
+  "response": "{\"class_id\":\"C7\",\"confidence\":0.95,\"rationale\":\"error_reason is payment_timed_out, directly matching payment_timed_out class.\",\"features_used\":[\"error_reason\"]}",
+  "usage": {
+    "input_tokens": 1154,
+    "output_tokens": 76
+  }
+}

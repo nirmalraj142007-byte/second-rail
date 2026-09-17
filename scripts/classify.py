@@ -30,8 +30,10 @@ Five sections, printed in the order a skeptical reader should see them
                                   Whichever wins is printed plainly; if
                                   regex wins, that is the headline, not a
                                   footnote (this project's own non-negotiable).
-  5. evidence/classification_metrics.json — everything above, machine-
-                                  readable.
+  5. evidence/classification_metrics_{split}.json — everything above,
+                                  machine-readable. Split-specific: a
+                                  train run and a sealed run no longer
+                                  overwrite each other.
 
 Every LLM call in sections 3-4 goes through the same DiskCache as
 production. `LLM_PROVIDER=none` (no key) does not crash this script: each
@@ -73,7 +75,13 @@ TRAIN_PATH = ROOT / "data" / "train.jsonl"
 SEALED_PATH = ROOT / "holdout" / "sealed.jsonl"
 HARVEST_PATH = ROOT / "evidence" / "harvested_errors.jsonl"
 DOC_SNAPSHOT_PATH = ROOT / "evidence" / "razorpay_error_codes_snapshot.md"
-METRICS_OUT_PATH = ROOT / "evidence" / "classification_metrics.json"
+def _metrics_out_path(split: str) -> Path:
+    """Split-specific, not a single shared file — a train run and a sealed
+    run used to silently overwrite each other (there is no "the"
+    classification_metrics.json, there's one per split, same as
+    evidence/eval_*.db). scripts/eval.py reads the train file specifically
+    for report.md's own head-to-head section."""
+    return ROOT / "evidence" / f"classification_metrics_{split}.json"
 
 TOP_N_FAMILIES = 5
 _DOC_TOKEN_CELL_RE = re.compile(r"^`([a-z_]+)`$")
@@ -308,6 +316,15 @@ def _section_production_run(
     cache_hits = 0
     llm_calls_attempted = 0
     pairs: list[tuple[str, str]] = []
+    # Separate from `pairs` (the blended regex+LLM cascade accuracy already
+    # reported below as accuracy_self_graded) — this is the tail ALONE:
+    # only episodes the regex baseline could not resolve, so accuracy here
+    # isolates what the LLM itself contributes rather than diluting it with
+    # the regex-resolved majority. Empty (and reported as None) on a split
+    # where regex resolves everything — e.g. train, see baseline.py's
+    # module docstring on why that split's coverage is a generator
+    # property, not evidence about real traffic.
+    tail_pairs: list[tuple[str, str]] = []
 
     for ep, true_class in episodes:
         try:
@@ -324,6 +341,7 @@ def _section_production_run(
             total_historical_cost_paise += _historical_cost_paise(pricing, diagnosis)
             if diagnosis.cache_hit:
                 cache_hits += 1
+            tail_pairs.append((diagnosis.class_id, true_class))
         pairs.append((diagnosis.class_id, true_class))
 
     n = len(episodes)
@@ -335,6 +353,7 @@ def _section_production_run(
         "llm_resolved": llm_count,
         "llm_unavailable_skipped": llm_unavailable_count,
         "coverage_regex_only": round(regex_count / n, 4) if n else 0.0,
+        "regex_unmatched_fraction": round(llm_count / n, 4) if n else 0.0,
         "llm_calls_attempted": llm_calls_attempted,
         "llm_cache_hits": cache_hits,
         "total_cost_paise": total_cost_paise,
@@ -343,6 +362,10 @@ def _section_production_run(
         "cost_rupees_per_100_episodes": round(cost_paise_per_100 / 100, 4),
         "accuracy_self_graded": round(_accuracy(pairs), 4),
         "precision_recall_f1_self_graded": prf1,
+        "tail_n_episodes": llm_count,
+        "accuracy_llm_only_on_tail_self_graded": (
+            round(_accuracy(tail_pairs), 4) if tail_pairs else None
+        ),
     }
 
 
@@ -545,7 +568,18 @@ def _print_report(
     )
 
     print("\n--- 2. self-graded metrics (vs this project's own generator truth) ---")
-    print(f"accuracy: {production['accuracy_self_graded'] * 100:.1f}%")
+    print(f"accuracy: {production['accuracy_self_graded'] * 100:.1f}% (blended, regex + LLM)")
+    tail_acc = production["accuracy_llm_only_on_tail_self_graded"]
+    if tail_acc is None:
+        print(
+            f"LLM-only accuracy on the regex-unmatched tail: n/a — "
+            f"{production['tail_n_episodes']} tail episode(s), regex resolved everything"
+        )
+    else:
+        print(
+            f"LLM-only accuracy on the regex-unmatched tail: {tail_acc * 100:.1f}% "
+            f"(n={production['tail_n_episodes']})"
+        )
     print(f"{'class':<6}{'precision':>10}{'recall':>10}{'f1':>10}{'support':>10}")
     for class_id, m in sorted(production["precision_recall_f1_self_graded"].items()):
         print(
@@ -678,8 +712,9 @@ def main() -> int:
         + head_to_head["total_llm_historical_cost_paise"]
     )
 
-    METRICS_OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    METRICS_OUT_PATH.write_text(
+    metrics_out_path = _metrics_out_path(args.split)
+    metrics_out_path.parent.mkdir(parents=True, exist_ok=True)
+    metrics_out_path.write_text(
         json.dumps(
             {
                 "split": args.split,
@@ -696,7 +731,7 @@ def main() -> int:
         ),
         encoding="utf-8",
     )
-    print(f"wrote {METRICS_OUT_PATH.relative_to(ROOT)}")
+    print(f"wrote {metrics_out_path.relative_to(ROOT)}")
     return 0
 
 

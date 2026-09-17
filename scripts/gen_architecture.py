@@ -36,7 +36,7 @@ STAGES = [
     ("gate", "gate", "det", "7 ordered eligibility checks"),
     ("diagnose", "diagnose", "llm", "regex baseline first; unmatched tail -> LLM classifier"),
     ("choose", "choose", "mixed", "policy table (det.) admits <=3; LLM selects 1"),
-    ("gate (recheck)", "gate", "det", "post-selection: caps, DND, quiet hours, idempotency"),
+    ("validate pick", "choose", "det", "model's answer must be verbatim in the allowed set"),
     ("approve", "ui", "det", "auto | human keystroke | hard refuse"),
     ("execute", "execute", "det", "idempotent Payment Link, hand-rolled backoff"),
     ("outcome listener", "attribute", "det", "payment_link.paid webhook"),

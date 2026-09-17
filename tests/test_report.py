@@ -17,6 +17,7 @@ from src.report.render import (
     ClassMetric,
     ExceptionRow,
     ExternallyAnchoredRow,
+    GatePreventedCounts,
     GuardrailProof,
     HeadToHeadRow,
     RecoveryFigure,
@@ -29,12 +30,14 @@ from src.report.render import (
     Section5,
     Section6,
     Section7,
+    TailSizingRow,
     WorkedException,
     render_report,
 )
 from src.report.sensitivity import (
     METHODOLOGY_NOTE,
     PARAM_REASONING,
+    STRUCTURALLY_INERT_PARAMS,
     SWEPT_PARAMS,
     WINDOW_NOTE,
 )
@@ -101,6 +104,17 @@ def _sample_data(*, execution_failed_count: int = 0) -> ReportData:
             HeadToHeadRow(family="gateway_technical_error", volume=69, regex_accuracy=1.0,
                            llm_accuracy=0.9, llm_sample_note="n=8"),
         ],
+        tail_sizing=[
+            TailSizingRow(label="train (n=400)", n_episodes=400, tail_count=0,
+                          tail_fraction=0.0, tail_llm_accuracy=None,
+                          real_cost_paise_per_100=0.0),
+            TailSizingRow(label="sealed (n=200)", n_episodes=200, tail_count=5,
+                          tail_fraction=0.025, tail_llm_accuracy=1.0,
+                          real_cost_paise_per_100=2.5),
+            TailSizingRow(label="harvested (n=20)", n_episodes=20, tail_count=19,
+                          tail_fraction=0.95, tail_llm_accuracy=0.1579,
+                          real_cost_paise_per_100=95.0),
+        ],
     )
     second_rail = RecoveryFigure(
         label="Second Rail", gross_low_paise=107556, gross_base_paise=153651,
@@ -118,8 +132,17 @@ def _sample_data(*, execution_failed_count: int = 0) -> ReportData:
     )
     section4 = Section4(
         second_rail=second_rail, baseline=baseline, swept_params=list(SWEPT_PARAMS),
+        inert_params=STRUCTURALLY_INERT_PARAMS,
         param_reasoning=PARAM_REASONING, window_note=WINDOW_NOTE,
         methodology_note=METHODOLOGY_NOTE,
+        gate_prevented=GatePreventedCounts(
+            batch_size=200, opt_out_count=0, opt_out_fraction=0.0,
+            quiet_hours_count=36, quiet_hours_fraction=0.18,
+            cap_breach_count=97, cap_breach_fraction=0.485,
+        ),
+        no_action_count=9,
+        denominator_note="**Why the gate-eligible counts differ (150 vs 150):** sample "
+        "fixture, not a real run.",
     )
     section5 = Section5(
         rows=[ExceptionRow(reason_code="duplicate_episode_this_run", count=5),

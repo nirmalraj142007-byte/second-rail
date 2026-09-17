@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-09-17T09:32:49+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "341e0efe3affd7e5857af2b6d2686042735f71ea667e54aae56578b6d778a6f0",
+  "response": "{\"class_id\":\"C4\",\"confidence\":0.95,\"rationale\":\"error_reason is authentication_failed, matching authentication_failed class.\",\"features_used\":[\"error_reason\"]}",
+  "usage": {
+    "input_tokens": 1153,
+    "output_tokens": 77
+  }
+}

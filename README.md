@@ -2,6 +2,16 @@
 
 Diagnoses Razorpay payments that failed after the customer left, takes one bounded reversible action, and measures what came back against a 200-episode test-mode batch. Deterministic guardrails, constrained LLM decisions, hash-chained audit trail.
 
+**Judge card, before the quickstart:**
+
+Second Rail diagnoses a failed Razorpay payment, picks one bounded action from a policy-constrained set, and reports what came back against a sealed 200-episode batch — no code path moves money.
+
+Three non-circular numbers, measured not modeled: **0** duplicate links, cap breaches, and quiet-hour contacts across 108 real test-mode Payment Link creations; **100%** of the model's choices fell inside its pre-approved action set (n=108); Second Rail's NET recovered per contact (Rs 520–965) beats the naive baseline's (Rs 504–936) at every point in that range, from 3 fewer contacts made (2.9% fewer).
+
+Most important caveat: the recovery rupee figure is a simulated design target, not a measurement — no real customer paid a synthetic link.
+
+Verify in one command: `make eval` (offline, no key, ~20s) then `cat evidence/report.md`.
+
 ## Quickstart
 
 ```bash
@@ -11,8 +21,6 @@ make eval           # sealed-split evaluation -> evidence/report.md, ~20s, no ke
 make verify-audit   # walks the hash chain, prints "chain intact - N records"
 ```
 
-**Windows, no plain `make` on PATH?** Substitute `mingw32-make` for `make` in every command above and below — confirmed working end to end (`mingw32-make setup && mingw32-make eval && mingw32-make verify-audit`) via `make clean-clone-test`, a fresh isolated clone, not this working tree. `scripts/judge_check.py`'s `find_make()` and `scripts/clean_clone_test.sh` already do this substitution automatically, trying `make`, `gmake`, then `mingw32-make` in that order. No `make`-family binary at all: `winget install GnuWin32.Make`.
-
 ## What it does
 
 One episode, end to end — eight stages, plus the audit chain every one of them writes into as it goes:
@@ -21,7 +29,7 @@ One episode, end to end — eight stages, plus the audit chain every one of them
 2. **gate** — 7 ordered eligibility checks (`src/gate/`, no LLM)
 3. **diagnose** — regex baseline first; only the unmatched tail reaches the LLM classifier (`src/diagnose/`)
 4. **choose** — a policy table (deterministic) admits an already-narrowed set of at most 3 actions; the LLM picks 1 (`src/choose/`)
-5. **gate, again** — post-selection re-check: caps, DND, quiet hours, idempotency (`src/gate/`, no LLM)
+5. **validate the pick** — the model's answer must be verbatim one of the actions it was offered, or the run halts (`src/choose/`, no LLM)
 6. **approve** — auto below the ceiling, a human keystroke above it, hard refuse in a third band (`src/ui/`, no LLM)
 7. **execute** — idempotent Payment Link, hand-rolled backoff (`src/execute/`, no LLM)
 8. **attribute** — outcome listener, 48h window, ledger: gross / false-positive cost / net (`src/attribute/`, no LLM)
@@ -43,8 +51,6 @@ The only external effect this system can produce is a **cancellable Razorpay Pay
 Full detail, including the confusion matrix and the exception list, is in **[evidence/report.md](evidence/report.md)**, which is committed — every result is readable without running anything.
 
 Sealed split: sha256-verified, 200 episodes (`holdout/SEAL.sha256`). Shift: `BANK_E` is reserved for the sealed split only — it never appears in `data/train.jsonl`. Attribution rule AR-01, window 48h (pre-registered in [outcome_model.md](outcome_model.md) §3).
-
-The ordering below is deliberate. The numbers that did not pass through a model I wrote come first.
 
 ### 1. Non-circular — measured against real API responses and real counts
 
@@ -71,13 +77,15 @@ Real `error_code` / `error_reason` strings forced out of Razorpay's own test-mod
 
 ### 3. Where the model loses
 
-On the harvested strings — the hardest and most externally-anchored data in this evaluation — **classifier accuracy collapses to 20.0%**. The LLM beats the regex baseline there (5.0%), but that is not the finding worth taking seriously: both are weak, and the humbling number is the 20.0%, not which method produced it. Separately, on the top five error families by volume, **free regex ties the paid model at 100% on both**. The model earns its cost only on the unmatched tail.
+On the harvested strings — the hardest and most externally-anchored data in this evaluation — **classifier accuracy collapses to 20.0%**. The LLM beats the regex baseline there (5.0%), but that is not the finding worth taking seriously: both are weak, and the humbling number is the 20.0%, not which method produced it. Separately, on the top five error families by volume, **free regex matches the paid model's accuracy — both score 100% on all five families**. The model earns its cost only on the unmatched tail — sized directly, not asserted: regex leaves 0% of train, 2.5% of sealed, and 95% of the harvested strings unmatched, and graded on exactly that unmatched slice (not blended with the regex-resolved majority), the model's accuracy is 100% on sealed's tiny tail and a harsher **15.8%** on the harvested tail — lower than the 20.0% blended figure above, since that figure includes the one harvested episode regex could already resolve. Full table: [evidence/report.md](evidence/report.md) §3.
 
 ### 4. Recovery — a design target, not a measurement
 
-**NET Rs 51,482 – Rs 95,580** across the 200-episode sealed split (99/108 gate-eligible episodes contacted before `cap_breach` fired), against a `FIXED_RETRY_AT_T30` baseline of **NET Rs 51,412 – Rs 95,449** (102/102 gate-eligible episodes contacted), net of false-positive cost, as a range under a ±30% sweep of three pre-registered parameters: response probability, attribution window (a structural no-op in this expected-value method — see `src/report/sensitivity.py`), and the goodwill proxy.
+**NET Rs 51,482 – Rs 95,580** across the 200-episode sealed split (99/108 gate-eligible episodes contacted before `cap_breach` fired), against a `FIXED_RETRY_AT_T30` baseline of **NET Rs 51,412 – Rs 95,449** (102/102 gate-eligible episodes contacted), net of false-positive cost, as a range under a ±30% sweep of two parameters that actually move this number — response probability and the goodwill proxy — plus a third, pre-registered parameter (attribution window) swept too but disclosed as a structural no-op in this expected-value method, not silently dropped (see `src/report/sensitivity.py`).
 
 Read that number sceptically. It passes through a customer-response model I wrote, pre-registered in [outcome_model.md](outcome_model.md) before any eval ran (`git log` confirms the timestamps). The sweep perturbs my own parameters and widens a band around a quantity I invented. It is disclosure, not evidence. Sections 1–3 are the evidence.
+
+**Counted, not modeled, unlike the figure above:** per contact, Second Rail's NET (Rs 520–965) beats the baseline's (Rs 504–936) at every point in the range, from 3 fewer contacts made (2.9% fewer) — net of 9 episodes it actively chose not to contact against 6 more it reached that the baseline's faster exposure-cap accrual never got to. Against a genuinely gate-free policy (contact all 200 sealed episodes unconditionally — not the baseline above, which already runs the same gate), the gate prevents 36 quiet-hour contacts (18.0%) and 97 cap-breaching contacts (48.5%); 0 opt-out contacts happen to fall in this particular 200-episode split. Full derivation: [evidence/report.md](evidence/report.md) §4.
 
 ## Where the LLM is and is not
 
@@ -191,12 +199,14 @@ Stack: Python 3.11, FastAPI, Pydantic 2.9, SQLite (WAL), Typer, Rich, matplotlib
 
 ## How to check this in 90 seconds
 
+**Windows, no plain `make` on PATH?** Substitute `mingw32-make` for `make` in every command below — confirmed working end to end (`mingw32-make setup && mingw32-make eval && mingw32-make verify-audit`) via `make clean-clone-test`, a fresh isolated clone, not this working tree. `scripts/judge_check.py`'s `find_make()` and `scripts/clean_clone_test.sh` already do this substitution automatically, trying `make`, `gmake`, then `mingw32-make` in that order. No `make`-family binary at all: `winget install GnuWin32.Make`.
+
 `make judge-quickstart` prints this same sequence with the expected outcome of each step — [scripts/judge_quickstart.py](scripts/judge_quickstart.py) is the single source for both.
 
 | step | expected outcome |
 |---|---|
 | `git clone https://github.com/nirmalraj142007-byte/second-rail.git && cd second-rail` | repo present locally |
-| `head -40 README.md` | seam, quickstart, and the no-code-moves-money heading all visible on one screen |
+| `head -45 README.md` | judge card, seam, quickstart, and the no-code-moves-money heading all visible on one screen |
 | `make setup` | pinned venv installs clean, no errors |
 | `make eval` | `evidence/report.md` regenerated, under 5 minutes, no API key, no network |
 | `cat evidence/report.md` | sections 1–4 in order: guardrail correctness, admissibility, cost/throughput, externally-anchored classification, then a recovery RANGE (never a point estimate) |

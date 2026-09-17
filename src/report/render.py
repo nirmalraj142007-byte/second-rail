@@ -149,6 +149,23 @@ class HeadToHeadRow:
 
 
 @dataclass
+class TailSizingRow:
+    """One source's regex-unmatched tail, sized: how big it is, how the
+    LLM does on exactly that slice (not blended with the regex-resolved
+    majority — see scripts/tail_size_analysis.py), and what it costs.
+    `tail_llm_accuracy` is None when the tail is empty (train: regex
+    resolves everything, so there is nothing for the LLM to be graded
+    on)."""
+
+    label: str
+    n_episodes: int
+    tail_count: int
+    tail_fraction: float
+    tail_llm_accuracy: float | None
+    real_cost_paise_per_100: float
+
+
+@dataclass
 class Section3:
     # The real headline: the weakest accuracy this project measured on any
     # externally-anchored source (never on self-generated data) — computed
@@ -163,6 +180,7 @@ class Section3:
     weakest_regex_accuracy: float
     head_to_head_summary: str
     rows: list[HeadToHeadRow]
+    tail_sizing: list[TailSizingRow]
 
 
 @dataclass
@@ -185,13 +203,34 @@ class RecoveryFigure:
 
 
 @dataclass
+class GatePreventedCounts:
+    """What a genuinely gate-free policy — contact every sealed episode
+    unconditionally, no opt-out check, no quiet hours, no exposure cap —
+    would have done, computed directly (scripts/efficiency_analysis.py),
+    not modeled. Not the same comparison as `baseline` below, which
+    already runs through the same gate as `second_rail`."""
+
+    batch_size: int
+    opt_out_count: int
+    opt_out_fraction: float
+    quiet_hours_count: int
+    quiet_hours_fraction: float
+    cap_breach_count: int
+    cap_breach_fraction: float
+
+
+@dataclass
 class Section4:
     second_rail: RecoveryFigure
     baseline: RecoveryFigure
     swept_params: list[str]
+    inert_params: frozenset[str]
     param_reasoning: dict[str, str]
     window_note: str
     methodology_note: str
+    gate_prevented: GatePreventedCounts
+    no_action_count: int
+    denominator_note: str
 
 
 @dataclass
@@ -463,6 +502,44 @@ def _render_section3(s: Section3) -> list[str]:
         regex_str = _fmt_pct(row.regex_accuracy)
         lines.append(f"| {row.family} | {row.volume} | {regex_str} | {llm_str} |")
     lines.append("")
+
+    lines += [
+        "### How big is the tail the LLM actually earns its place on?",
+        "",
+        "\"The model only earns its place on the unmatched tail\" (section 1) is a claim "
+        "about coverage, not accuracy — sized here directly "
+        "(`scripts/tail_size_analysis.py`), reusing `scripts/classify.py`'s own "
+        "production cascade unmodified. Accuracy below is graded on the tail alone, not "
+        "blended with the regex-resolved majority, so it is a harsher, more specific "
+        "number than section 2's whole-source accuracy figures above.",
+        "",
+        "| source | n | regex leaves unmatched | LLM accuracy on that tail | "
+        "real cost / 100 episodes |",
+        "|---|---|---|---|---|",
+    ]
+    for row in s.tail_sizing:
+        tail_acc = "n/a (tail empty)" if row.tail_llm_accuracy is None else _fmt_pct(
+            row.tail_llm_accuracy
+        )
+        lines.append(
+            f"| {row.label} | {row.n_episodes} | {row.tail_count} "
+            f"({row.tail_fraction * 100:.1f}%) | {tail_acc} | "
+            f"{format_rupees_measured(row.real_cost_paise_per_100)} |"
+        )
+    lines += [
+        "",
+        "Train's tail is empty by construction (section 1's 100% regex coverage is a "
+        "generator property, not a finding — see `src/diagnose/baseline.py`), so the LLM "
+        "is never called on it and costs nothing. On the harvested strings specifically, "
+        "the tail is nearly the whole source (19/20) and the LLM's accuracy graded on "
+        "exactly that tail is lower than section 2's blended figure for the same source "
+        "— the one episode regex does resolve there was also one the LLM happened to get "
+        "right when queried independently in section 2's methodology, which flatters the "
+        "blended number slightly. On sealed, the tail is small (2.5% of the batch) and the "
+        "LLM handles it cleanly — the closest thing in this report to the tail actually "
+        "being worth its cost.",
+        "",
+    ]
     return lines
 
 
@@ -487,14 +564,30 @@ def _render_recovery_block(r: RecoveryFigure) -> list[str]:
     return lines
 
 
+def _render_per_contact(r: RecoveryFigure) -> str:
+    low = r.net_low_paise / r.contacted_count
+    base = r.net_base_paise / r.contacted_count
+    high = r.net_high_paise / r.contacted_count
+    per_contact_range = format_rupee_range(round(low), round(base), round(high))
+    return (
+        f"**{r.label}**: {per_contact_range} NET per contact, across "
+        f"{r.contacted_count} contact(s)."
+    )
+
+
 def _render_section4(s: Section4) -> list[str]:
+    active_params = [p for p in s.swept_params if p not in s.inert_params]
+    inert_params = [p for p in s.swept_params if p in s.inert_params]
     lines = [
         "## 4. Design target under stated assumptions",
         "",
         "This is a simulator. Every figure below passes through the customer-response model "
         "in `outcome_model.md`; sections 1-3 above do not.",
         "",
-        f"Sensitivity sweep, +/-30% on three parameters: {', '.join(s.swept_params)}.",
+        f"Sensitivity sweep, +/-30%, on {len(active_params)} parameter(s) that actually move "
+        f"this number: {', '.join(active_params)}. A third, pre-registered parameter "
+        f"({', '.join(inert_params)}) is swept too, for disclosure completeness, but is "
+        "structurally non-applicable to this figure, not silently dropped — see below.",
         "",
     ]
     for p in s.swept_params:
@@ -511,6 +604,41 @@ def _render_section4(s: Section4) -> list[str]:
         "",
         "This sweep perturbs my own parameters and widens a band around a quantity I invented. "
         "It is disclosure, not evidence. Sections 1-3 are the evidence.",
+        "",
+    ]
+
+    contacts_avoided = s.baseline.contacted_count - s.second_rail.contacted_count
+    contacts_avoided_pct = contacts_avoided / s.baseline.contacted_count * 100
+
+    lines += [
+        "### Efficiency, per contact",
+        "",
+        _render_per_contact(s.second_rail),
+        "",
+        _render_per_contact(s.baseline),
+        "",
+        s.denominator_note,
+        "",
+        "**Counted, not modeled** — unlike the rupee figures above, nothing below passes "
+        "through `outcome_model.md`; these are direct counts over the sealed batch and "
+        "the two runs' own recorded decisions.",
+        "",
+        f"- **Contacts avoided**: Second Rail contacts {contacts_avoided} fewer customer(s) "
+        f"than the baseline ({contacts_avoided_pct:.1f}% fewer) — net of {s.no_action_count} "
+        "episode(s) it actively chose `no_action` on against "
+        f"{s.second_rail.gate_eligible_count - s.baseline.gate_eligible_count} additional "
+        "episode(s) it reached that the baseline's faster exposure-cap accrual never got "
+        "to (see the note above).",
+        f"- **Against a genuinely gate-free policy** — contact every one of the "
+        f"{s.gate_prevented.batch_size} sealed episodes unconditionally, no opt-out check, "
+        "no quiet hours, no exposure cap (not the baseline above, which already runs the "
+        "same gate as Second Rail — see `scripts/efficiency_analysis.py`): the gate "
+        f"prevents {s.gate_prevented.opt_out_count} opt-out contact(s) "
+        f"({s.gate_prevented.opt_out_fraction * 100:.1f}%), "
+        f"{s.gate_prevented.quiet_hours_count} quiet-hour contact(s) "
+        f"({s.gate_prevented.quiet_hours_fraction * 100:.1f}%), and "
+        f"{s.gate_prevented.cap_breach_count} cap-breaching contact(s) "
+        f"({s.gate_prevented.cap_breach_fraction * 100:.1f}%).",
         "",
     ]
     return lines

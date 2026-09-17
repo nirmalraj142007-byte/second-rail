@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-09-17T09:07:49+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "b0512d3616dd06fc9b0dfec3430a07113523701ec67d016f6ef8c217012af79d",
+  "response": "{\"class_id\":\"C1\",\"confidence\":0.92,\"rationale\":\"error_reason is insufficient_fund, matching insufficient_funds.\",\"features_used\":[\"error_reason\"]}",
+  "usage": {
+    "input_tokens": 1157,
+    "output_tokens": 55
+  }
+}

@@ -610,34 +610,39 @@ dashboard.
 
 # Natural speaking version (no memorizing required)
 
-Say this cold, in this order, filling in your own words at each `//`:
+Say this cold, in this order, filling in your own words at each `//`. Real
+figures throughout — the amount and the ceiling are epi_00006's actual
+amount and `config/guardrails.yaml`'s actual threshold, not illustrative
+examples:
 
-> "This is a payment recovery system. A customer's payment failed —
-> here's the actual episode, ₹7,500, `card_declined`. // Normally
-> Razorpay sends me a webhook about this; I verify it and dedup it so
-> the same failure can't create two records. // Before I do anything
-> about it, seven checks run — has this customer opted out, is the
-> payment too old, that kind of thing. This episode passes all of them.
-> // Now I try to figure out why it failed. I use plain pattern matching
-> first — regex — and only fall back to an AI model if that doesn't
-> match. This one matched, so no model call happened here. // This next
-> part is the important architectural point. My code decides what
-> actions are even possible — at most three, and 'do nothing' is always
-> one of them — before the model does anything. The model only picks
-> from that list. It never sees the actual rupee amount, only a band.
-> // Once it picks, two more checks run, and neither of them is the
-> model: is the pick actually a legal option — if not, the whole run
-> stops — and does this specific episode need a human to approve it.
-> This one's above my ₹5,000 line, so it needs my keystroke. // I
-> approve it, and now the executor creates a real Razorpay Payment
-> Link — test mode. This does not move money. The customer still has to
-> open it and pay. And if this exact episode ever came through twice,
-> the second attempt wouldn't create a second link — I can show that.
-> // The system doesn't count this as recovered just because a link
-> exists — it watches for an actual payment, within a time window, and
-> only then counts it. // And every one of these steps I just described
-> wrote a record to a hash chain — I can prove right now that nothing in
-> that chain has been altered."
+```
+This is a payment recovery system. A customer's payment failed --
+here's the actual episode, Rs 7,500, card_declined. // Normally
+Razorpay sends me a webhook about this; I verify it and dedup it so
+the same failure can't create two records. // Before I do anything
+about it, seven checks run -- has this customer opted out, is the
+payment too old, that kind of thing. This episode passes all of them.
+// Now I try to figure out why it failed. I use plain pattern matching
+first -- regex -- and only fall back to an AI model if that doesn't
+match. This one matched, so no model call happened here. // This next
+part is the important architectural point. My code decides what
+actions are even possible -- at most three, and 'do nothing' is always
+one of them -- before the model does anything. The model only picks
+from that list. It never sees the actual rupee amount, only a band.
+// Once it picks, two more checks run, and neither of them is the
+model: is the pick actually a legal option -- if not, the whole run
+stops -- and does this specific episode need a human to approve it.
+This one's above my Rs 5,000 line, so it needs my keystroke. // I
+approve it, and now the executor creates a real Razorpay Payment
+Link -- test mode. This does not move money. The customer still has to
+open it and pay. And if this exact episode ever came through twice,
+the second attempt wouldn't create a second link -- I can show that.
+// The system doesn't count this as recovered just because a link
+exists -- it watches for an actual payment, within a time window, and
+only then counts it. // And every one of these steps I just described
+wrote a record to a hash chain -- I can prove right now that nothing in
+that chain has been altered.
+```
 
 ---
 

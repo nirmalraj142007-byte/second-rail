@@ -1,0 +1,10 @@
+{
+  "cached_at": "2026-09-17T10:09:38+00:00",
+  "model": "openai/gpt-oss-20b",
+  "prompt_hash": "50cf758bc9e36833ab825b341bae6864bda7ca0782e0b5bf44e688f6fc1601a4",
+  "response": "{\"class_id\":\"C9\",\"confidence\":0.95,\"rationale\":\"error_reason is invalid_device, indicating the device or app was unreachable.\",\"features_used\":[\"error_reason\"]}",
+  "usage": {
+    "input_tokens": 1153,
+    "output_tokens": 102
+  }
+}

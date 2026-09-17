@@ -17,8 +17,9 @@ REPO_URL = "https://github.com/nirmalraj142007-byte/second-rail.git"
 STEPS = [
     (f"git clone {REPO_URL} && cd second-rail",
      "repo present locally"),
-    ("head -40 README.md",
-     "seam, quickstart, and the no-code-moves-money heading all visible on one screen"),
+    ("head -45 README.md",
+     "judge card, seam, quickstart, and the no-code-moves-money heading all visible "
+     "on one screen"),
     ("make setup",
      "pinned venv installs clean, no errors"),
     ("make eval",
