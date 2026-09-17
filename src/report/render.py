@@ -528,16 +528,22 @@ def _render_section3(s: Section3) -> list[str]:
         )
     lines += [
         "",
-        "Train's tail is empty by construction (section 1's 100% regex coverage is a "
-        "generator property, not a finding — see `src/diagnose/baseline.py`), so the LLM "
-        "is never called on it and costs nothing. On the harvested strings specifically, "
-        "the tail is nearly the whole source (19/20) and the LLM's accuracy graded on "
-        "exactly that tail is lower than section 2's blended figure for the same source "
-        "— the one episode regex does resolve there was also one the LLM happened to get "
-        "right when queried independently in section 2's methodology, which flatters the "
-        "blended number slightly. On sealed, the tail is small (2.5% of the batch) and the "
-        "LLM handles it cleanly — the closest thing in this report to the tail actually "
-        "being worth its cost.",
+        "Read plainly: on synthetic data the model is close to redundant. Regex leaves "
+        "0% of train and 2.5% of sealed unmatched — there is almost no tail here for the "
+        "LLM to earn its cost on, and train's tail is empty by construction (section 1's "
+        "100% regex coverage is a generator property, not a finding — see "
+        "`src/diagnose/baseline.py`), so the LLM is never called on it at all. Sealed's "
+        "tail is real but tiny (5 episodes out of 200) and the LLM resolves it cleanly.",
+        "",
+        "On the 20 harvested real strings, the picture reverses: regex leaves 95% "
+        "unmatched (19/20), and graded on exactly that tail the LLM resolves 15.8% of "
+        "it — lower than section 2's blended figure for the same source, since that "
+        "figure includes the one harvested episode regex could already resolve. **Label "
+        "this harvested figure explicitly as n=20 — an anecdote, not a measurement: one "
+        "more or one fewer correct call on the tail (1/19) swings the reported accuracy "
+        "by about 5 points.** It is the only place in this report where the LLM's tail "
+        "coverage is large, and it is also the place with the least statistical weight "
+        "behind it.",
         "",
     ]
     return lines
@@ -610,8 +616,37 @@ def _render_section4(s: Section4) -> list[str]:
     contacts_avoided = s.baseline.contacted_count - s.second_rail.contacted_count
     contacts_avoided_pct = contacts_avoided / s.baseline.contacted_count * 100
 
+    sr_per_contact_base = s.second_rail.net_base_paise / s.second_rail.contacted_count
+    baseline_per_contact_base = s.baseline.net_base_paise / s.baseline.contacted_count
+    per_contact_gap_pct = (
+        (sr_per_contact_base - baseline_per_contact_base) / baseline_per_contact_base * 100
+    )
+
     lines += [
-        "### Efficiency, per contact",
+        "### What the gate actually prevents",
+        "",
+        "**Counted, not modeled** — unlike every rupee figure above, this does not pass "
+        "through `outcome_model.md`; these are direct counts over the sealed batch and "
+        "the two runs' own recorded decisions.",
+        "",
+        f"Against a genuinely gate-free policy — contact every one of the "
+        f"{s.gate_prevented.batch_size} sealed episodes unconditionally, no opt-out check, "
+        "no quiet hours, no exposure cap (not the baseline below, which already runs the "
+        "same gate as Second Rail — see `scripts/efficiency_analysis.py`) — the gate "
+        f"prevents {s.gate_prevented.cap_breach_count} cap-breaching contact(s) "
+        f"({s.gate_prevented.cap_breach_fraction * 100:.1f}%), "
+        f"{s.gate_prevented.quiet_hours_count} quiet-hour contact(s) "
+        f"({s.gate_prevented.quiet_hours_fraction * 100:.1f}%), and "
+        f"{s.gate_prevented.opt_out_count} opt-out contact(s) "
+        f"({s.gate_prevented.opt_out_fraction * 100:.1f}%). This is the strongest, most "
+        "direct evidence in this section of what gating buys — real magnitude, on real "
+        "counts, against a policy nobody would actually ship.",
+        "",
+        "### Second Rail vs. the baseline, per contact — a null result",
+        "",
+        "Both runs above already pass through the identical 7-check gate, so this "
+        "comparison isolates only what sits on top of it — diagnosis and "
+        "policy-constrained choice — not gating itself.",
         "",
         _render_per_contact(s.second_rail),
         "",
@@ -619,26 +654,22 @@ def _render_section4(s: Section4) -> list[str]:
         "",
         s.denominator_note,
         "",
-        "**Counted, not modeled** — unlike the rupee figures above, nothing below passes "
-        "through `outcome_model.md`; these are direct counts over the sealed batch and "
-        "the two runs' own recorded decisions.",
-        "",
         f"- **Contacts avoided**: Second Rail contacts {contacts_avoided} fewer customer(s) "
         f"than the baseline ({contacts_avoided_pct:.1f}% fewer) — net of {s.no_action_count} "
         "episode(s) it actively chose `no_action` on against "
         f"{s.second_rail.gate_eligible_count - s.baseline.gate_eligible_count} additional "
         "episode(s) it reached that the baseline's faster exposure-cap accrual never got "
         "to (see the note above).",
-        f"- **Against a genuinely gate-free policy** — contact every one of the "
-        f"{s.gate_prevented.batch_size} sealed episodes unconditionally, no opt-out check, "
-        "no quiet hours, no exposure cap (not the baseline above, which already runs the "
-        "same gate as Second Rail — see `scripts/efficiency_analysis.py`): the gate "
-        f"prevents {s.gate_prevented.opt_out_count} opt-out contact(s) "
-        f"({s.gate_prevented.opt_out_fraction * 100:.1f}%), "
-        f"{s.gate_prevented.quiet_hours_count} quiet-hour contact(s) "
-        f"({s.gate_prevented.quiet_hours_fraction * 100:.1f}%), and "
-        f"{s.gate_prevented.cap_breach_count} cap-breaching contact(s) "
-        f"({s.gate_prevented.cap_breach_fraction * 100:.1f}%).",
+        f"- **Per-contact NET gap**: about {abs(per_contact_gap_pct):.0f}% "
+        f"({'higher' if per_contact_gap_pct >= 0 else 'lower'} than the baseline) — and "
+        "this figure passes through `outcome_model.md`, unlike the counts above.",
+        "",
+        f"Read plainly: {contacts_avoided} contacts ({contacts_avoided_pct:.1f}%) and a "
+        f"~{abs(per_contact_gap_pct):.0f}% per-contact NET gap are both inside noise on a "
+        "simulated quantity — section 4's own sensitivity sweep moves the NET range by "
+        "more than this gap on a single +/-30% parameter perturbation. This comparison "
+        "does not show Second Rail beating the baseline. The gate does the work, not "
+        "the model.",
         "",
     ]
     return lines

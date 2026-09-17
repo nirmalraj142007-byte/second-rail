@@ -6,7 +6,7 @@ Diagnoses Razorpay payments that failed after the customer left, takes one bound
 
 Second Rail diagnoses a failed Razorpay payment, picks one bounded action from a policy-constrained set, and reports what came back against a sealed 200-episode batch — no code path moves money.
 
-Three non-circular numbers, measured not modeled: **0** duplicate links, cap breaches, and quiet-hour contacts across 108 real test-mode Payment Link creations; **100%** of the model's choices fell inside its pre-approved action set (n=108); Second Rail's NET recovered per contact (Rs 520–965) beats the naive baseline's (Rs 504–936) at every point in that range, from 3 fewer contacts made (2.9% fewer).
+Three non-circular numbers, measured not modeled: **0** duplicate links, cap breaches, and quiet-hour contacts across 108 real test-mode Payment Link creations; **100%** of the model's choices fell inside its pre-approved action set (n=108); against a policy that contacts every eligible episode unconditionally, the gate alone prevents **97** cap-breaching contacts (48.5%) and **36** quiet-hour contacts (18.0%) across the sealed batch.
 
 Most important caveat: the recovery rupee figure is a simulated design target, not a measurement — no real customer paid a synthetic link.
 
@@ -77,7 +77,9 @@ Real `error_code` / `error_reason` strings forced out of Razorpay's own test-mod
 
 ### 3. Where the model loses
 
-On the harvested strings — the hardest and most externally-anchored data in this evaluation — **classifier accuracy collapses to 20.0%**. The LLM beats the regex baseline there (5.0%), but that is not the finding worth taking seriously: both are weak, and the humbling number is the 20.0%, not which method produced it. Separately, on the top five error families by volume, **free regex matches the paid model's accuracy — both score 100% on all five families**. The model earns its cost only on the unmatched tail — sized directly, not asserted: regex leaves 0% of train, 2.5% of sealed, and 95% of the harvested strings unmatched, and graded on exactly that unmatched slice (not blended with the regex-resolved majority), the model's accuracy is 100% on sealed's tiny tail and a harsher **15.8%** on the harvested tail — lower than the 20.0% blended figure above, since that figure includes the one harvested episode regex could already resolve. Full table: [evidence/report.md](evidence/report.md) §3.
+On the harvested strings — the hardest and most externally-anchored data in this evaluation — **classifier accuracy collapses to 20.0%**. The LLM beats the regex baseline there (5.0%), but that is not the finding worth taking seriously: both are weak, and the humbling number is the 20.0%, not which method produced it. Separately, on the top five error families by volume, **free regex matches the paid model's accuracy — both score 100% on all five families**.
+
+Sized directly, not asserted (`scripts/tail_size_analysis.py`): regex leaves the LLM almost nothing to do on synthetic data — **0%** of train and **2.5%** of sealed go unmatched, so on this evaluation's own generated splits the model is close to redundant. The picture reverses on the 20 harvested real strings, where regex misses **95%** and, graded on exactly that unmatched tail, the LLM resolves **15.8%** of it. **That harvested figure is n=20 — an anecdote, not a measurement: one more or one fewer correct call on the 19-episode tail swings it by about 5 points.** Full table: [evidence/report.md](evidence/report.md) §3.
 
 ### 4. Recovery — a design target, not a measurement
 
@@ -85,7 +87,9 @@ On the harvested strings — the hardest and most externally-anchored data in th
 
 Read that number sceptically. It passes through a customer-response model I wrote, pre-registered in [outcome_model.md](outcome_model.md) before any eval ran (`git log` confirms the timestamps). The sweep perturbs my own parameters and widens a band around a quantity I invented. It is disclosure, not evidence. Sections 1–3 are the evidence.
 
-**Counted, not modeled, unlike the figure above:** per contact, Second Rail's NET (Rs 520–965) beats the baseline's (Rs 504–936) at every point in the range, from 3 fewer contacts made (2.9% fewer) — net of 9 episodes it actively chose not to contact against 6 more it reached that the baseline's faster exposure-cap accrual never got to. Against a genuinely gate-free policy (contact all 200 sealed episodes unconditionally — not the baseline above, which already runs the same gate), the gate prevents 36 quiet-hour contacts (18.0%) and 97 cap-breaching contacts (48.5%); 0 opt-out contacts happen to fall in this particular 200-episode split. Full derivation: [evidence/report.md](evidence/report.md) §4.
+**Counted, not modeled, unlike the figure above:** against a genuinely gate-free policy — contact all 200 sealed episodes unconditionally, not the baseline above, which already runs the same gate — the gate alone prevents **97** cap-breaching contacts (48.5%) and **36** quiet-hour contacts (18.0%); 0 opt-out contacts happen to fall in this particular 200-episode split. That's the strong result here: counted, not modeled, with real magnitude.
+
+The baseline comparison above, by contrast, is a null result and is reported as one: per contact, Second Rail's NET (Rs 520–965) is about 3% higher than the baseline's (Rs 504–936), from 3 fewer contacts made (2.9% fewer) — net of 9 episodes it actively chose not to contact against 6 more it reached that the baseline's faster exposure-cap accrual never got to. Both the 3-contact gap and the ~3% NET gap are inside noise on a simulated quantity — this section's own ±30% sweep moves the NET range by far more than that. The reason the comparison is this flat: the baseline already runs the identical gate, so it isolates only the diagnosis-and-policy layer on top of gating, and that layer adds little. **The gate does the work, not the model.** Full derivation: [evidence/report.md](evidence/report.md) §4.
 
 ## Where the LLM is and is not
 

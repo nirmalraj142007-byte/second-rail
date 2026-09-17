@@ -1,5 +1,5 @@
 # Second Rail — Results
-Run `01M2QFKW6HF1HKATJ87PPQBSYH` · `36de92d` · config `9e22c9aa673f…` · 2026-09-17T16:17:03+05:30
+Run `01M2QGD1CR6W3AW14BFZEFF3PA` · `9cb06a7` · config `9e22c9aa673f…` · 2026-09-17T16:30:49+05:30
 Sealed split: sha256 verified — 200 episodes (see `holdout/SEAL.sha256`) · shift: BANK_E is reserved for the sealed split only.
 
 Attribution rule AR-01, window 48h.
@@ -36,7 +36,7 @@ Stopping rule fired this run: `cap_breach` — the batch was 200 episodes, 131 w
 
 ### Throughput and LLM cost
 
-Throughput: 1381.9 episodes/min over 131 of 200 sealed episodes processed.
+Throughput: 1289.8 episodes/min over 131 of 200 sealed episodes processed.
 
 LLM cost this run (cache-aware, 0 paise on every cache hit): Rs 0.00 (measured), Rs 0.00 (measured) per 100 episodes.
 
@@ -77,7 +77,9 @@ Separately (self-generated data, not externally anchored — see the top-5 error
 | sealed (n=200) | 200 | 5 (2.5%) | 100.0% | Rs 0.03 (measured) |
 | harvested (n=20) | 20 | 19 (95.0%) | 15.8% | Rs 0.95 (measured) |
 
-Train's tail is empty by construction (section 1's 100% regex coverage is a generator property, not a finding — see `src/diagnose/baseline.py`), so the LLM is never called on it and costs nothing. On the harvested strings specifically, the tail is nearly the whole source (19/20) and the LLM's accuracy graded on exactly that tail is lower than section 2's blended figure for the same source — the one episode regex does resolve there was also one the LLM happened to get right when queried independently in section 2's methodology, which flatters the blended number slightly. On sealed, the tail is small (2.5% of the batch) and the LLM handles it cleanly — the closest thing in this report to the tail actually being worth its cost.
+Read plainly: on synthetic data the model is close to redundant. Regex leaves 0% of train and 2.5% of sealed unmatched — there is almost no tail here for the LLM to earn its cost on, and train's tail is empty by construction (section 1's 100% regex coverage is a generator property, not a finding — see `src/diagnose/baseline.py`), so the LLM is never called on it at all. Sealed's tail is real but tiny (5 episodes out of 200) and the LLM resolves it cleanly.
+
+On the 20 harvested real strings, the picture reverses: regex leaves 95% unmatched (19/20), and graded on exactly that tail the LLM resolves 15.8% of it — lower than section 2's blended figure for the same source, since that figure includes the one harvested episode regex could already resolve. **Label this harvested figure explicitly as n=20 — an anecdote, not a measurement: one more or one fewer correct call on the tail (1/19) swings the reported accuracy by about 5 points.** It is the only place in this report where the LLM's tail coverage is large, and it is also the place with the least statistical weight behind it.
 
 ## 4. Design target under stated assumptions
 
@@ -109,7 +111,15 @@ Recovery is computed as an expected value — Sigma(response_probability x amoun
 
 This sweep perturbs my own parameters and widens a band around a quantity I invented. It is disclosure, not evidence. Sections 1-3 are the evidence.
 
-### Efficiency, per contact
+### What the gate actually prevents
+
+**Counted, not modeled** — unlike every rupee figure above, this does not pass through `outcome_model.md`; these are direct counts over the sealed batch and the two runs' own recorded decisions.
+
+Against a genuinely gate-free policy — contact every one of the 200 sealed episodes unconditionally, no opt-out check, no quiet hours, no exposure cap (not the baseline below, which already runs the same gate as Second Rail — see `scripts/efficiency_analysis.py`) — the gate prevents 97 cap-breaching contact(s) (48.5%), 36 quiet-hour contact(s) (18.0%), and 0 opt-out contact(s) (0.0%). This is the strongest, most direct evidence in this section of what gating buys — real magnitude, on real counts, against a policy nobody would actually ship.
+
+### Second Rail vs. the baseline, per contact — a null result
+
+Both runs above already pass through the identical 7-check gate, so this comparison isolates only what sits on top of it — diagnosis and policy-constrained choice — not gating itself.
 
 **Second Rail**: Rs 520 - Rs 965 NET per contact, across 99 contact(s).
 
@@ -117,10 +127,10 @@ This sweep perturbs my own parameters and widens a band around a quantity I inve
 
 **Why the gate-eligible counts differ (108 vs 102), even though both runs apply the identical 7-check gate to the identical sealed batch:** the per-run exposure cap (`amount_cap`, `config/guardrails.yaml`) only accrues for episodes actually committed to — Second Rail chose `no_action` on 9 gate-eligible episode(s), and `src/runner.py` deliberately excludes those from the exposure accumulator (a no_action episode is never really contacted), so the cap takes longer to trip and the run reaches further into the batch before stopping. The baseline's `placeholder_action` is never `no_action`, so every eligible episode counts against the cap immediately. This is a real mechanism, not a bug — confirmed by querying both runs' own databases, not inferred.
 
-**Counted, not modeled** — unlike the rupee figures above, nothing below passes through `outcome_model.md`; these are direct counts over the sealed batch and the two runs' own recorded decisions.
-
 - **Contacts avoided**: Second Rail contacts 3 fewer customer(s) than the baseline (2.9% fewer) — net of 9 episode(s) it actively chose `no_action` on against 6 additional episode(s) it reached that the baseline's faster exposure-cap accrual never got to (see the note above).
-- **Against a genuinely gate-free policy** — contact every one of the 200 sealed episodes unconditionally, no opt-out check, no quiet hours, no exposure cap (not the baseline above, which already runs the same gate as Second Rail — see `scripts/efficiency_analysis.py`): the gate prevents 0 opt-out contact(s) (0.0%), 36 quiet-hour contact(s) (18.0%), and 97 cap-breaching contact(s) (48.5%).
+- **Per-contact NET gap**: about 3% (higher than the baseline) — and this figure passes through `outcome_model.md`, unlike the counts above.
+
+Read plainly: 3 contacts (2.9%) and a ~3% per-contact NET gap are both inside noise on a simulated quantity — section 4's own sensitivity sweep moves the NET range by more than this gap on a single +/-30% parameter perturbation. This comparison does not show Second Rail beating the baseline. The gate does the work, not the model.
 
 ## 5. Exceptions
 
