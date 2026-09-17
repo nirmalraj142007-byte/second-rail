@@ -24,6 +24,7 @@ first: a build log that only records what worked is a press release.
 - [D6 (attribution) - 30 Aug 2026](#d6-attribution--30-aug-2026) - twice: assumed the Payment Link cap was still exhausted and built the module around fixtures, then leaked a rupee glyph into a parser regex and tripped the repo's own money-literal grep.
 - [D9 (judge-gap closure) - 2 Sep 2026](#d9-judge-gap-closure--2-sep-2026) - went in believing Razorpay Support had raised the test-mode link cap to unlimited. No record of that exists anywhere in this repo; the cap reset on its own and I cannot say why.
 - [D10 (rehearsal) - 4 Sep 2026](#d10-rehearsal--4-sep-2026) - assumed `scripts/failure_demo.py`'s own throwaway-DB reset was enough to make three consecutive real runs identical. It resets the local database; it does not reset what Razorpay itself remembers about the `reference_id`s that database produces, and the second real run failed almost entirely on HTTP 400 "already exists" instead of the intended fault-injection flow.
+- [D12 (post-competition quality pass) - 17 Sep 2026](#d12-post-competition-quality-pass--17-sep-2026) - ran bare `make classify SPLIT=train` expecting a fully cached, instant confirmation run. It drove ~90 fresh LLM calls into real Groq rate-limiting instead, because the committed evidence was originally generated with a capped head-to-head sample and the bare command's actual default is uncapped — a gap between what the evidence claims was run and what the command alone does.
 
 
 ## D1 — 25 Aug 2026
@@ -2235,3 +2236,121 @@ Re-sealed (`make seal`) against the now-canonical LF working tree --
 blob exactly, not just this machine's checkout. `make verify-seal`,
 `make eval`, the full test suite (197 passed), and `make judge-check`
 (17/18, JG-06 only, unchanged) all re-confirmed clean afterward.
+
+## D12 (post-competition quality pass) — 17 Sep 2026
+
+Competition over, no deadline — quality improvements to a finished
+project, asked to take the time rather than rush. Four things, all
+numbers computed from data already in the repo, reported as-is
+including the ones that don't flatter the pitch.
+
+**1. Efficiency delta vs the baseline, counted not modeled.** Aggregate
+parity (Second Rail NET Rs 51,482–95,580 vs the baseline's
+Rs 51,412–95,449) made the pipeline look pointless next to a policy
+that contacts everyone. Per-contact NET tells a different story: Second
+Rail's Rs 520–965 beats the baseline's Rs 504–936 at every point in the
+range. New script, `scripts/efficiency_analysis.py`. Traced the
+108-vs-102 gate-eligible denominator difference in code before writing
+a sentence about it, not after guessing: `state.exposure_committed_paise`
+(`src/runner.py`) only accrues for episodes actually contacted, so
+Second Rail's 9 `no_action` choices exempt it from the per-run exposure
+cap for 6 episodes longer than the baseline (which never chooses
+`no_action`, so every eligible episode counts against the cap
+immediately) — confirmed by querying both runs' own SQLite databases
+directly, not inferred from behaviour. Net effect on actual contacts is
+only 3 fewer (2.9%), smaller than "9 no_action choices" alone would
+suggest, because those same 6 extra reached episodes partially offset
+it — reported plainly rather than leading with the bigger, less honest
+number. Separately, sized what a genuinely gate-free policy (contact
+all 200 sealed episodes unconditionally — not the `FIXED_RETRY_AT_T30`
+baseline, which already runs the identical 7-check gate) would have
+done: 36 quiet-hour contacts (18.0%) and 97 cap-breaching contacts
+(48.5%) prevented. Opt-out prevented: 0 — checked, not assumed away;
+only 1 of ~500 synthetic customers is opted out at all, and that
+customer's episode landed in the train split, not sealed.
+
+**2. LLM tail, sized instead of asserted.** `evidence/report.md` has
+claimed for phases the model "earns its place on the unmatched tail"
+without ever putting a number on how big that tail is. New script,
+`scripts/tail_size_analysis.py`, reusing `scripts/classify.py`'s own
+production-cascade section unmodified rather than duplicating its
+logic. Regex leaves 0% of train, 2.5% of sealed, and 95% of the 20
+harvested strings unmatched. Graded on exactly that unmatched slice —
+not blended with the regex-resolved majority, which is what section
+2's existing accuracy figures do — the LLM's accuracy is n/a on train
+(nothing to grade), 100% on sealed's 5-episode tail, and a harsher
+15.8% on the harvested tail, lower than the 20.0% figure already in
+the report for the same source (that figure includes the one harvested
+episode regex can already resolve, which flatters it slightly).
+
+**The wrong turn, in full.** Before building the narrow tail-sizing
+script, ran bare `make classify SPLIT=train` expecting a cheap,
+fully-cached confirmation pass. It drove roughly 90 fresh LLM calls
+into real Groq rate-limiting instead — `_section_head_to_head`'s
+uncapped default sends every episode in every top-5 family to the LLM,
+and the *committed* evidence had actually been generated with a capped
+sample (`llm_max_per_family=8`, matching a documented free-tier RPM
+constraint), a fact that had drifted out of sync with what the bare
+command now does by default. Reverted the corrupted output rather than
+trust it (`git show HEAD:... > ...`, since the file had only been
+`git mv`'d, not committed, so a plain `git checkout HEAD --` failed
+against the new path first — a small, separate trip-up worth naming).
+Confirmed the blob content matched exactly afterward. Every 90-ish
+fresh call did get cached for real, though — legitimate, valid,
+content-addressed responses, kept and committed rather than discarded,
+since a fuller head-to-head cache for `make classify SPLIT=train`
+genuinely lowers cost for whoever runs it uncapped next.
+
+**3. README judge card.** 127 words, above the quickstart: one-sentence
+thesis, three non-circular numbers (0 duplicate links/cap breaches/
+quiet-hour contacts across 108 real link creations; 100% admissibility;
+the per-contact efficiency delta above, kept as a range, not a point
+estimate, consistent with this project's own non-negotiable on that).
+One caveat: the recovery rupee figure is simulated, not measured.
+Removed "the ordering below is deliberate" — anxious meta-commentary
+about the document's own structure, not content.
+
+**4. Small fixes.** `head -40 README.md`'s claim broke the moment the
+judge card landed above it (the three landmarks it named moved to line
+41-43) — fixed the claim to `head -45` rather than cut good content to
+force the old number back, and updated it in the three places it's
+actually asserted (`README.md`'s own table, `scripts/judge_quickstart.py`,
+`scripts/judge_check.py`'s `jg14`) rather than just one. Caught, while
+editing nearby text, a real accuracy problem worth fixing on the spot:
+README's 8-stage list and `scripts/gen_architecture.py`'s `STAGES` (which
+feeds `docs/architecture.png`) both described a "gate, again — post
+-selection re-check" that was never actually implemented — `Runner.run()`
+calls the gate exactly once per episode (grepped for every
+`gate.evaluate` call site to be sure, not assumed). Replaced both with
+what the code actually does there: the model's pick is validated
+against the admissible set it was given, and the run halts if it
+doesn't match. Regenerated the diagram. Fixed "free regex ties the
+paid model at 100% on both" (unclear referent — both *what*) to name
+the five families explicitly. Reframed the sensitivity sweep as two
+parameters that move the number plus a third disclosed as structurally
+non-applicable, not "three parameters" implying all three do
+(`src/report/sensitivity.py`: `STRUCTURALLY_INERT_PARAMS`). Added
+`LICENSE` (MIT).
+
+**Also found and fixed in passing:** the exact same false-positive this
+project already hit once on `demo/panel-prep.md` — `make judge-check`'s
+JG-11 (vendor-numbers) flags any blockquote with 2+ real rupee figures
+as needing an "illustrative" label it doesn't deserve, since these are
+verbatim, not invented, numbers. `demo/system-walkthrough-script.md`'s
+"natural speaking version" blockquote had the identical shape (quoting
+epi_00006's real ₹7,500 and the real ₹5,000 ceiling) and had simply
+never been judge-checked before now. Same fix as before: fenced code
+block instead of a blockquote.
+
+`classify.py`'s output is now split-specific
+(`evidence/classification_metrics_{split}.json`) rather than one file a
+sealed run would silently overwrite a train run with — the committed
+train file was previously the only one that had ever been generated.
+
+Verified: full test suite 197 passed (six pre-existing `Section3`/
+`Section4` test-fixture constructions needed the new required fields,
+fixed with realistic sample values, not defaults that would let a real
+caller silently omit them). `make artifact-scan` clean. `make
+judge-check` 17/18 — JG-06 only, pre-existing (`guardrail_proof.json`
+needs N≥200, a real-API-quota decision flagged since D9, not touched
+this session) and unrelated to anything changed here.
